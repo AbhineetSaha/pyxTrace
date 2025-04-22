@@ -133,7 +133,8 @@ class TraceSession:
                         rec = json.loads(line)
                     except json.JSONDecodeError:
                         # picked up an incomplete line → retry shortly
-                        fp.seek(pos)
+                        if ' "BytecodeEvent"' in line:
+                            continue
                         time.sleep(0.02)
                         continue
                     self._queue.put(
