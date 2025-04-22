@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: pyxtrace
+Version: 0.1.0
+Summary: Interactive Visual Tracer for Python System Calls, Bytecode and Memory
+Author-email: Abhineet Saha <abhineetsaha.2004@gmail.com>
+License: MIT
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: typer[all]>=0.10.0
+Requires-Dist: rich>=13.7.1
+Requires-Dist: python-ptrace>=0.9.9
+Requires-Dist: psutil>=5.9.8
+Requires-Dist: graphviz>=0.20.1
+Provides-Extra: dash
+Requires-Dist: dash>=2.17.0; extra == "dash"
+Provides-Extra: notebook
+Requires-Dist: ipykernel>=6.29; extra == "notebook"
+Provides-Extra: windows
+Requires-Dist: pywin32>=306; sys_platform == "win32" and extra == "windows"
