@@ -4,3 +4,6 @@ build/
 *.egg-info/dist/
 build/
 *.egg-info/
+dist/
+build/
+*.egg-info/\__pycache__/
