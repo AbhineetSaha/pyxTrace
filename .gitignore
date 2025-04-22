@@ -1,0 +1,4 @@
+#Byte-code caches
+src/pyxtrace/__pycache__
+src/pyxtrace/syscalls/__pycache__
+src/pyxtrace/pyxtrace.egg-info
