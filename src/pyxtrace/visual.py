@@ -1,142 +1,3 @@
-# """
-# visual.py – dead‑simple text/UI renderer + optional Dash dashboard.
-# """
-
-# from __future__ import annotations
-
-# import json
-# import os
-# from pathlib import Path
-# from typing import List
-
-# from rich.console import Console
-# from rich.panel import Panel
-# from rich.progress import Progress
-
-
-# class TraceVisualizer:
-#     def __init__(self, path: str | Path, live: bool = False):
-#         self.path   = pathlib.Path(path)
-#         self.events = []           # filled lazily in live‑mode
-#         self.live   = live
-#         if not live:                              # ← original (static) behaviour
-#             with self.path.open() as fp:
-#                 self.events = [json.loads(r) for r in fp]
-
-#     @classmethod
-#     def from_jsonl(cls, path: str | Path) -> "TraceVisualizer":
-#         return cls(path)
-
-#     # ------------------------------------------------------------------ #
-#     def render(self) -> None:
-#         console = Console()
-#         console.rule("[bold blue]pyxtrace summary")
-#         syscall_cnt = sum(1 for e in self.events if e["kind"] == "syscall")
-#         bc_cnt = sum(1 for e in self.events if e["kind"] == "BytecodeEvent")
-#         mem_samples = sum(1 for e in self.events if e["kind"] == "MemoryEvent")
-
-#         console.print(
-#             f"[green]syscalls[/]: {syscall_cnt}   "
-#             f"[cyan]byte‑ops[/]: {bc_cnt}   "
-#             f"[magenta]mem samples[/]: {mem_samples}"
-#         )
-#         console.rule()
-
-#     # ------------------------------------------------------------------ #
-#     def dash(self) -> None:
-#         from dash import Dash, dcc, html
-#         from dash.dependencies import Input, Output, State
-#         import pathlib, json, itertools, time
-#         import plotly.graph_objects as go
-
-#         _CURSOR   = itertools.count()           # used to remember file position
-#         _MEM_LINE = go.Scatter(x=[], y=[], mode="lines", name="heap (kB)")
-#         _SYS_BARS = go.Bar     (x=[], y=[], name="syscalls")
-
-#         app = Dash(__name__)
-#         app.layout = html.Div(
-#             [
-#                 dcc.Graph(id="mem-usage",
-#                           figure=go.Figure(data=[_MEM_LINE])),
-#                 dcc.Graph(id="syscall-hist",
-#                           figure=go.Figure(data=[_SYS_BARS])),
-
-#                 # live commentary
-#                 html.Pre(id="insight-box",
-#                          style={"background":"#111", "color":"#0f0",
-#                                 "padding":"0.5em", "font-size":"14px"}),
-
-#                 dcc.Interval(id="pulse", interval=1_000, n_intervals=0)
-#             ]
-#         )
-
-#         # ── callbacks ────────────────────────────────────────────────
-
-#         @app.callback(
-#             Output("mem-usage",   "figure"),
-#             Output("syscall-hist","figure"),
-#             Output("insight-box", "children"),
-#             Input ("pulse",       "n_intervals"),
-#             State ("mem-usage",   "figure"),
-#             State ("syscall-hist","figure"),
-#             prevent_initial_call=False,
-#         )
-#         def _tick(t, mem_fig, sys_fig):
-#             """
-#             Every second: read any new JSONL rows *after* the cursor,
-#             extend the Plotly traces and produce a short textual blurb.
-#             """
-#             path  = self.path
-#             cur   = next(_CURSOR)          # advance cursor ⇒ remember old value
-#             # reopen each time → works even if file is still being written
-#             new   = []
-#             with path.open() as fp:
-#                 fp.seek(cur)
-#                 for row in fp:
-#                     try:
-#                         new.append(json.loads(row))
-#                     except json.JSONDecodeError:
-#                         break               # line still being written – try later
-#                 _CURSOR.__setstate__(fp.tell())   # save current offset
-
-#             # accumulate values -------------------------------------------------
-#             for ev in new:
-#                 if ev["kind"] == "MemoryEvent":
-#                     _MEM_LINE["x"].append(ev["ts"])
-#                     _MEM_LINE["y"].append(ev["payload"]["current_kb"])
-#                 elif ev["kind"] == "SyscallEvent":
-#                     name = ev["payload"]["name"]
-#                     count = ev["payload"]["count"]
-#                     if name in _SYS_BARS["x"]:
-#                         i = _SYS_BARS["x"].index(name)
-#                         _SYS_BARS["y"][i] = count
-#                     else:
-#                         _SYS_BARS["x"].append(name)
-#                         _SYS_BARS["y"].append(count)
-
-#             # insight text ------------------------------------------------------
-#             txt  = (f"⏱ {t}s  |  heap {(_MEM_LINE['y'][-1]/1024):.1f} MB"
-#                     if _MEM_LINE["y"] else "waiting for data…")
-#             return (
-#                 go.Figure(data=[_MEM_LINE]),
-#                 go.Figure(data=[_SYS_BARS]),
-#                 txt,
-#             )
-
-#         @app.callback(Output("mem", "figure"), Input("timer", "n_intervals"))
-#         def update(_):
-#             ts, mem = [], []
-#             # always read *our* file, ignore old root‑owned ones
-#             with self.path.open() as fp:
-#                 for line in fp:
-#                     rec = json.loads(line)
-#                     if rec.get("kind") == "MemoryEvent":
-#                         ts.append(rec["ts"])
-#                         mem.append(rec["payload"]["current_kb"])
-#             return go.Figure(data=[go.Scatter(x=ts, y=mem, mode="lines")])
-
-#         app.run(debug=False, host="127.0.0.1", port=8050)
-
 """
 visual.py – text summary with Rich + optional live Dash dashboard
 """
@@ -170,8 +31,14 @@ class TraceVisualizer:
         self.events: List[dict] = []
 
         if not live:                               # ← static / classic mode
-            with self.path.open() as fp:
-                self.events = [json.loads(line) for line in fp]
+            # Windows can leave half‑written JSONL rows → be tolerant
+            with self.path.open(encoding="utf‑8") as fp:
+                for raw in fp:
+                    try:
+                        self.events.append(json.loads(raw))
+                    except json.JSONDecodeError:
+                        # skip garbage / partially‑written line
+                        continue
 
     # ------------------------------------------------------------------ #
     @classmethod
