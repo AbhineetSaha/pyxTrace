@@ -125,16 +125,20 @@ class TraceVisualizer:
         def _tick(tick, mem_fig, sys_fig):
             """Read new events and extend the figures in‑place."""
             new_rows: list[dict] = []
-            with self.path.open() as fp:
-                fp.seek(cursor_pos[0])            # jump to previous EOF
-                for raw in fp:
+
+            with self.path.open(encoding="utf‑8") as fp:
+                fp.seek(cursor_pos[0])                 # jump to previous EOF
+                while True:
+                    raw = fp.readline()
+                    if not raw:                        # no more bytes yet
+                        break
                     try:
                         new_rows.append(json.loads(raw))
-                    except json.JSONDecodeError:  # line incomplete
-                        break
-                cursor_pos[0] = fp.tell()         # remember new EOF
+                    except json.JSONDecodeError:       # half‑written line
+                        break                          # try again next tick
+                cursor_pos[0] = fp.tell()              # remember new EOF
 
-            # reuse existing trace data that the browser sent us back
+            # ── reuse existing trace data ─────────────────────────────
             mem_x = mem_fig["data"][0]["x"]
             mem_y = mem_fig["data"][0]["y"]
             sys_x = sys_fig["data"][0]["x"]
@@ -142,11 +146,10 @@ class TraceVisualizer:
             sys_idx = {name: i for i, name in enumerate(sys_x)}
 
             for ev in new_rows:
-                kind = ev.get("kind")
-                if kind == "MemoryEvent":
+                if ev.get("kind") == "MemoryEvent":
                     mem_x.append(ev["ts"])
                     mem_y.append(ev["payload"]["current_kb"])
-                elif kind == "SyscallEvent":
+                elif ev.get("kind") == "SyscallEvent":
                     name  = ev["payload"]["name"]
                     count = ev["payload"]["count"]
                     if name in sys_idx:
@@ -157,17 +160,14 @@ class TraceVisualizer:
                         sys_y.append(count)
 
             insight = (
-                f"⏱ {tick}s  |  heap {(mem_y[-1]/1024):.1f} MB"
-                if mem_y else
-                "waiting for data…"
+                f"⏱ {tick}s  |  heap {(mem_y[-1]/1024):.1f} MB" if mem_y
+                else "waiting for data…"
             )
 
-            # Return refreshed figures (Dash diffs & redraws)
             return (
                 go.Figure(data=[go.Scatter(x=mem_x, y=mem_y, mode="lines",
                                            name="heap (kB)")]),
-                go.Figure(data=[go.Bar(x=sys_x, y=sys_y,
-                                       name="syscalls")]),
+                go.Figure(data=[go.Bar(x=sys_x, y=sys_y, name="syscalls")]),
                 insight,
             )
 
