@@ -1,12 +1,4 @@
-# build artefacts
 dist/
-build/
-*.egg-info/dist/
-build/
-*.egg-info/
-dist/
-build/
-*.egg-info/\__pycache__/
-dist/
-build/
-*.egg-info/\__pycache__/
+*.egg-info
+__pycache__/
+.pypirc
