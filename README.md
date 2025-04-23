@@ -18,7 +18,7 @@
 <sup>Byte‑code • Memory • (optional) Sys‑call tracing &nbsp;|&nbsp; Rich CLI + Live Dash dashboard</sup>
 
 <br/><br/>
-<a href="#-quick-start"><img src="https://raw.githubusercontent.com/AbhineetSaha/pyxtrace/main/docs/demo.gif" alt="demo" width="760"></a>
+<a href="#-quick-start"><img src="./Demo.gif" alt="demo" width="760"></a>
 </div>
 
 ---
