@@ -87,7 +87,10 @@ src/pyxtrace/
 ├─ core.py         ← orchestration (spawns child, tails JSONL, …)
 ├─ bytecode.py     ← BytecodeTracer  ➜ writes events
 ├─ memory.py       ← MemoryTracer    ➜ writes events
-├─ syscalls.py     ← SyscallTracer   ➜ queues live events (Linux)
+├─ syscalls        ← SyscallTracer   ➜ queues live events (Linux)
+   ├─ darwin.py
+   ├─ linux.py
+   ├─ windows.py
 ├─ visual.py       ← Rich table + Dash dashboard
 └─ …
 ```
