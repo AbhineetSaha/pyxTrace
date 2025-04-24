@@ -1,0 +1,60 @@
+name: Publish to PyPI / TestPyPI
+
+# ───────────────────────────────────────────────────────────── #
+# ── WHEN DOES THE WORKFLOW RUN?                               #
+#    • Every push to main   →  deploy to  TEST PyPI            #
+#    • Every git tag v*     →  deploy to  PROD PyPI            #
+# ───────────────────────────────────────────────────────────── #
+on:
+  push:
+    branches: ["main"]
+    tags:     ["v*"]      # e.g.  v0.1.2, v2.0.0-rc1
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    # Give the job write access to the repository (for provenance)
+    permissions:
+      id-token: write      # required for trusted publishing
+      contents: read
+
+    steps:
+      # 1) Checkout the repo
+      - uses: actions/checkout@v4
+
+      # 2) Set up Python (change if you need a specific version)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 3) Install build backend
+      - run: python -m pip install --upgrade build
+
+      # 4) Build wheel + sdist → artefacts end up in ./dist/
+      - name: Build distributions
+        run: python -m build
+
+      # 5) Choose repository (Test or Prod) based on ref type
+      - id: repo
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "REPOSITORY_URL=https://upload.pypi.org/legacy/" >> "$GITHUB_OUTPUT"
+          else
+            echo "REPOSITORY_URL=https://test.pypi.org/legacy/"   >> "$GITHUB_OUTPUT"
+          fi
+
+      # 6) Upload using the official PyPI publish action
+      - name: Publish 📦
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ steps.repo.outputs.REPOSITORY_URL }}
+          # For classic API tokens -------------------------------------------------
+          # password: ${{ secrets.PYPI_API_TOKEN }}
+          # For trusted-publishing (no password) just omit the 'password' key
+
+      # 7) (optional) keep the built artefacts as workflow artefacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-files
+          path: dist/*
