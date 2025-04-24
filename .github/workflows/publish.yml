@@ -32,7 +32,6 @@ jobs:
         run: python -m build
 
       - name: mint API token
-        - name: mint API token
           id: mint-token
           run: |
             # Retrieve the ambient OIDC token
@@ -40,15 +39,15 @@ jobs:
               "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=pypi")
             echo "OIDC token response: $resp" # Add this line for debugging
             oidc_token=$(jq -r '.value' <<< "${resp}")
-        
+            
             # Exchange the OIDC token for an API token
             resp=$(curl -X POST https://pypi.org/_/oidc/mint-token -d "{\"token\": \"${oidc_token}\"}")
             echo "API token response: $resp" # Add this line for debugging
             api_token=$(jq -r '.token' <<< "${resp}")
-        
+
             # Mask the newly minted API token, so that we don't accidentally leak it
             echo "::add-mask::${api_token}"
-        
+
             # Set the API token as an output
             echo "api-token=${api_token}" >> "${GITHUB_OUTPUT}"
 
