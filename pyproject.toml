@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "dash"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "pyxtrace"
-version         = "0.1.0"
+name            = "pyxTrace"
+version         = "1.0.0"
 description     = "Interactive Visual Tracer for Python System Calls, Bytecode and Memory"
 authors         = [{ name = "Abhineet Saha", email = "abhineetsaha.2004@gmail.com" }]
 readme          = "README.md"
