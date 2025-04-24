@@ -11,7 +11,7 @@
 <p>
   <a href="https://pypi.org/project/pyxtrace/"><img src="https://img.shields.io/pypi/v/pyxtrace?style=for-the-badge&logo=python" alt="PyPI"></a>
   <a href="https://github.com/AbhineetSaha/pyxtrace/blob/main/LICENSE"><img src="https://img.shields.io/github/license/AbhineetSaha/pyxtrace?style=for-the-badge" alt="License"></a>
-  <img alt="PyPI - Version" src="https://img.shields.io/pypi/v/pyxtrace?pypiBaseUrl=https%3A%2F%2Fpepy.tech%2Fprojects%2Fpyxtrace&style=flat-square">
+  <a href="https://pypi.org/project/pyxtrace/"><img src="https://img.shields.io/pypi/v/pyxtrace?style=for-the-badge&logo=python" alt="Downloads"></a>
 
 
 <sup>Byte‑code • Memory • (optional) Sys‑call tracing &nbsp;|&nbsp; Rich CLI + Live Dash dashboard</sup>
