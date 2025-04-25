@@ -2,7 +2,7 @@
 
 <!-- Title block -->
 <img src="https://raw.githubusercontent.com/AbhineetSaha/pyxtrace/main/docs/logo.svg" alt="PyXTrace logo" width="340"/>
-
+<script type="module" src="https://md-block.verou.me/md-block.js"></script>
 <h1>PyXTrace<br/>
 <sub><em>🩺 Your program under the microscope – in real&nbsp;time</em></sub>
 </h1>
@@ -12,7 +12,12 @@
   <a href="https://pypi.org/project/pyxtrace/"><img src="https://img.shields.io/pypi/v/pyxtrace?style=for-the-badge&logo=python" alt="PyPI"></a>
   <a href="https://github.com/AbhineetSaha/pyxtrace/blob/main/LICENSE"><img src="https://img.shields.io/github/license/AbhineetSaha/pyxtrace?style=for-the-badge" alt="License"></a>
   <a href="https://github.com/AbhineetSaha/pyxtrace/actions"><img src="https://img.shields.io/github/actions/workflow/status/AbhineetSaha/pyxtrace/ci.yml?style=for-the-badge&label=CI" alt="CI"></a>
-  <a href="https://pepy.tech/projects/pyxtrace"><img src="https://img.shields.io/pypi/dm/pyxtrace?style=for-the-badge" alt="Downloads"></a>
+  <br>
+  <a href="https://pepy.tech/projects/pyxtrace"><img src="https://static.pepy.tech/badge/pyxtrace" alt="PyPI Downloads"></a>
+<!--   <a href="https://pepy.tech/projects/pyxtrace"><img src="https://img.shields.io/pypi/dm/pyxtrace?style=for-the-badge" alt="Downloads"></a> -->
+ 
+
+
 
 <sup>Byte‑code • Memory • (optional) Sys‑call tracing &nbsp;|&nbsp; Rich CLI + Live Dash dashboard</sup>
 
@@ -21,6 +26,7 @@
 </div>
 
 ---
+
 
 ## 🗺️ Table of Contents
 - [✨ Features](#-features)
