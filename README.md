@@ -2,7 +2,6 @@
 
 <!-- Title block -->
 <img src="https://raw.githubusercontent.com/AbhineetSaha/pyxtrace/main/docs/logo.svg" alt="PyXTrace logo" width="340"/>
-<script type="module" src="https://md-block.verou.me/md-block.js"></script>
 <h1>PyXTrace<br/>
 <sub><em>🩺 Your program under the microscope – in real&nbsp;time</em></sub>
 </h1>
