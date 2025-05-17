@@ -1,6 +1,6 @@
 [project]
 name            = "pyxtrace"
-version         = "1.1.0"
+version         = "1.1.1"
 description     = "🩺  Your Python program under the microscope – byte-code, memory & optional syscalls, with a live Dash dashboard."
 readme          = "README.md"
 authors         = [{ name = "Abhineet Saha", email = "abhineet@example.com" }]
