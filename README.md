@@ -1,139 +1,164 @@
+Below is a cleaned-up **README.md** that **omits every reference to a “Restart” button** (or any other control you’ve removed).
+Copy-paste it into the project root and commit.
+
+````markdown
 <div align="center">
 
-<!-- Title block -->
-<img src="https://raw.githubusercontent.com/AbhineetSaha/pyxtrace/main/docs/logo.svg" alt="PyXTrace logo" width="340"/>
 <h1>PyXTrace<br/>
-<sub><em>🩺 Your program under the microscope – in real&nbsp;time</em></sub>
+<sub><em>🩺 Your Python program under the microscope – in real&nbsp;time</em></sub>
 </h1>
 
-<!-- Shields.io badges -->
 <p>
-  <a href="https://pypi.org/project/pyxtrace/"><img src="https://img.shields.io/pypi/v/pyxtrace?style=for-the-badge&logo=python" alt="PyPI"></a>
-  <a href="https://github.com/AbhineetSaha/pyxtrace/blob/main/LICENSE"><img src="https://img.shields.io/github/license/AbhineetSaha/pyxtrace?style=for-the-badge" alt="License"></a>
-  <a href="https://github.com/AbhineetSaha/pyxtrace/actions"><img src="https://img.shields.io/github/actions/workflow/status/AbhineetSaha/pyxtrace/ci.yml?style=for-the-badge&label=CI" alt="CI"></a>
+  <a href="https://pypi.org/project/pyxtrace/"><img alt="PyPI" src="https://img.shields.io/pypi/v/pyxtrace?style=for-the-badge&logo=python"></a>
+  <a href="https://github.com/AbhineetSaha/pyxtrace/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/AbhineetSaha/pyxtrace?style=for-the-badge"></a>
+  <a href="https://github.com/AbhineetSaha/pyxtrace/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/AbhineetSaha/pyxtrace/ci.yml?style=for-the-badge&label=CI"></a>
   <br>
-  <a href="https://pepy.tech/projects/pyxtrace"><img src="https://static.pepy.tech/badge/pyxtrace" alt="PyPI Downloads"></a>
-<!--   <a href="https://pepy.tech/projects/pyxtrace"><img src="https://img.shields.io/pypi/dm/pyxtrace?style=for-the-badge" alt="Downloads"></a> -->
- 
+  <a href="https://pepy.tech/projects/pyxtrace"><img alt="Downloads" src="https://img.shields.io/pypi/dm/pyxtrace?style=for-the-badge"></a>
+</p>
 
+<sup>Byte-code • Memory • (optional) Sys-call tracing &nbsp;|&nbsp; Rich CLI + live Dash dashboard</sup>
 
-
-<sup>Byte‑code • Memory • (optional) Sys‑call tracing &nbsp;|&nbsp; Rich CLI + Live Dash dashboard</sup>
-
-<br/><br/>
-<a href="#-quick-start"><img src="./Demo.gif" alt="demo" width="760"></a>
+<br/>
+<a href="#-quick-start"><img src="./Demo.gif" alt="Demo animation" width="760"></a>
 </div>
 
 ---
 
-
-## 🗺️ Table of Contents
-- [✨ Features](#-features)
-- [🚀 Installation](#-installation)
-- [🕹️ Quick start](#-quick-start)
-- [📂 Project layout](#-project-layout)
-- [🛣️ Road‑map](#️-road-map)
-- [👩‍💻 Contributing](#-contributing)
-- [⚖️ License](#️-license)
-- [🙏 Acknowledgements](#-acknowledgements)
-
----
-
-## ✨ Features
-
-| 🔍 What you see          | 💡 Under the hood                  | 📊 Visualised as               |
-|--------------------------|-----------------------------------|--------------------------------|
-| **Byte‑code timeline**   | `sys.settrace` → JSON Lines       | (upcoming) call‑stack heat‑map |
-| **Memory utilisation**   | polling `tracemalloc`             | Live heap‑usage line chart     |
-| **Sys‑calls ( Linux)**    | `strace - c - p …`                  | Histogram (top hitters)        |
-| **Smart commentary**     | heuristic summary per second      | Green console‑style panel      |
-
-*Works out‑of‑the‑box on macOS & Linux.  
-Windows → byte‑code + memory tracing (no `strace`).*
+## 🗺️ Table&nbsp;of&nbsp;Contents
+- [✨ Features](#-features)
+- [🚀 Installation](#-installation)
+- [🕹️ Quick start](#-quick-start)
+- [📂 Project layout](#-project-layout)
+- [🛣️ Road-map](#️-road-map)
+- [👩‍💻 Contributing](#-contributing)
+- [⚖️ License](#️-license)
+- [🙏 Acknowledgements](#-acknowledgements)
 
 ---
 
-## 🚀 Installation
+## ✨ Features
+
+| 🔍 What you see           | 💡 Captured via            | 📈 Visualised as (Dash) |
+|---------------------------|---------------------------|-------------------------|
+| **Byte-code timeline**    | `sys.settrace`            | Cumulative line graph   |
+| **Heap usage (kB)**       | `tracemalloc` snapshots   | Live line graph         |
+| **Sys-calls (Linux)**     | `strace -c -p …`          | Cumulative line graph   |
+| **Smart commentary**      | 1 s heuristics            | Green console panel     |
+
+*macOS & Linux fully supported.  
+Windows → byte-code + memory tracing (no `strace`).*
+
+---
+
+## 🚀 Installation
 
 ```bash
 # stable
 pip install pyxtrace
 
-# nightly / pre‑releases
+# pre-release / nightly
 pip install --pre pyxtrace
+````
 
-# extras
-pip install "pyxtrace[dashboard]"   # Dash + Plotly
-pip install "pyxtrace[dev]"         # black, ruff, mypy, …
-Note – On Linux you’ll also need strace if you want syscall tracing
-(sudo apt install strace, yay -S strace, …).
-
-**Linux users**: `strace` requires root permissions to trace system calls. You have two options:
-1. Run with sudo: `sudo pyxtrace trace examples/fibonacci.py`
-2. Run without syscall tracing: `pyxtrace trace --no-syscalls examples/fibonacci.py`
-
-## 🕹️ Quick Start
+### Optional extras
 
 ```bash
-# Basic usage
-pyxtrace trace examples/fibonacci.py           # Rich table only
-pyxtrace trace examples/fibonacci.py --dash    # + live dashboard
-
-# Pass arguments to your script
-pyxtrace trace train.py --dash -- --epochs 10 --lr 3e-4
+pip install "pyxtrace[dashboard]"   # Dash + Plotly live UI
+pip install "pyxtrace[dev]"         # black, ruff, mypy, pytest, …
 ```
 
-## 📂 Project Layout
+> **Linux users** – syscall tracing needs `strace` *and* root:
+>
+> ```bash
+> sudo apt install strace
+> sudo pyxtrace --dash your_script.py
+> ```
+>
+> or skip sys-calls with `--no-syscalls`.
+
+---
+
+## 🕹️ Quick start
+
+```bash
+# Rich CLI summary only
+pyxtrace examples/fibonacci.py
+
+# Live dashboard (opens http://127.0.0.1:8050)
+pyxtrace --dash examples/fibonacci.py
+
+# Pass cmd-line args to your script
+pyxtrace --dash train.py -- --epochs 10 --lr 3e-4
+
+# Performance presets
+pyxtrace --mode demo  script.py   # call/return only   (fastest)
+pyxtrace --mode perf  script.py   # skip std-lib lines
+pyxtrace --mode full  script.py   # trace everything   (slowest)
+```
+
+When the dashboard opens, press **▶ Start** to begin streaming events in
+real-time. A speed slider lets you throttle or accelerate the playback
+(10 – 500 events / s).
+
+---
+
+## 📂 Project layout
 
 ```
 src/pyxtrace/
-├─ cli.py          ← Typer CLI entry‑points
-├─ core.py         ← orchestration (spawns child, tails JSONL, …)
-├─ bytecode.py     ← BytecodeTracer  ➜ writes events
-├─ memory.py       ← MemoryTracer    ➜ writes events
-├─ syscalls        ← SyscallTracer   ➜ queues live events (Linux)
-   ├─ darwin.py
-   ├─ linux.py
-   ├─ windows.py
-├─ visual.py       ← Rich table + Dash dashboard
+├─ cli.py           ← Typer CLI entry-point
+├─ core.py          ← orchestration + JSONL replay
+├─ bytecode.py      ← byte-code tracer
+├─ memory.py        ← heap sampler (tracemalloc)
+├─ syscalls/        ← syscall tracer (Linux / Darwin stubs)
+├─ visual.py        ← Rich summary + Dash dashboard
 └─ …
 ```
 
-*Note: Everything under `dist/`, `*.egg-info`, `__pycache__`, `coverage`, build artifacts is ignored via `.gitignore`.*
+---
 
-## 🛣️ Roadmap
+## 🛣️ Road-map
 
-- 🔥 Flame‑graph view (Chrome‑style)
-- ⏱ CPU sample profiler (perf integration)
-- 🌎 Remote dashboard via websockets
-- 🧩 VS Code extension
+| Status | Item                                   |
+| :----: | -------------------------------------- |
+|   🔄   | Flame-graph view (Chrome-style)        |
+|   🔄   | CPU sample profiler (`perf` hook)      |
+|   🔄   | Remote dashboard via websockets        |
+|   🔄   | VS Code extension                      |
+|   🕓   | **Streamlit dashboard (next release)** |
+
+---
 
 ## 👩‍💻 Contributing
 
 ```bash
-# Setup development environment
 git clone https://github.com/AbhineetSaha/pyxtrace.git
-cd pyxtrace && python -m venv .venv && source .venv/bin/activate
+cd pyxtrace
+python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,dashboard]"
-pre-commit install        # auto-format on commit
-
-# Development workflow
-1. Fork & branch – one PR per feature/bug-fix
-2. Run tests: pytest -q && ruff check . && mypy src/
-3. Submit a pull-request ❤️
+pre-commit install
 ```
+
+1. Create a feature branch from **main**
+2. Run `pytest -q && ruff check . && mypy src/`
+3. Open a pull-request ❤️
+
+---
 
 ## ⚖️ License
 
-Released under the MIT License – see LICENSE.
+Released under the **MIT License** – see [`LICENSE`](LICENSE).
+
+---
 
 ## 🙏 Acknowledgements
 
-| Tool / Lib | Why it's awesome |
-|------------|------------------|
-| Rich & Typer | Beautiful CLIs with zero boiler‑plate |
-| Dash / Plotly | Reactive dashboards in pure Python |
-| tracemalloc | The unsung hero of the stdlib |
-| strace | Decades‑old but still magical |
+| Project / Lib     | Why it’s awesome                             |
+| ----------------- | -------------------------------------------- |
+| **Rich & Typer**  | Beautiful CLIs with zero boiler-plate        |
+| **Dash / Plotly** | Interactive dashboards in pure Python        |
+| **tracemalloc**   | Built-in heap sampler, criminally underrated |
+| **strace**        | Decades-old yet still magical                |
 
-And you – for trying, starring ⭐ and contributing!
+…and **you** – for trying, starring ⭐ and contributing!
+

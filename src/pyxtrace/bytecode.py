@@ -1,92 +1,98 @@
 """
-Byte‑code tracer for CPython 3.12/3.13
-⇒ pushes every event to the live queue
-⇒ captures the operand stack (3.12)
+bytecode.py – FilteredTracer
+• full  – trace everything
+• perf  – skip std-lib/built-ins
+• demo  – call/return only
+In all modes we also filter by root_path so only events from the user’s
+script (or its siblings) are logged.
+Every accepted BytecodeEvent is accompanied by an inline MemoryEvent.
 """
 
 from __future__ import annotations
-import dis, json, os, sys, threading, time
-from dataclasses import dataclass, asdict
+
+import time
+import tracemalloc
+from pathlib import Path
 from types import FrameType
-from typing import List, Optional, Union
-from queue import Queue
+from typing import Any, Dict, Set
 
-from .core import Event            # your own simple dataclass
+tracemalloc.start()
 
-# ───────────────────────────────── dataclass ───────────────────────────
-@dataclass
-class BytecodeEvent:
-    ts: float
-    func: str
-    lineno: int
-    opoffset: int
-    opname: str
-    stack: List[str]
+__all__ = ["FilteredTracer"]
 
-# ───────────────────────────────── tracer ──────────────────────────────
-class BytecodeTracer:
-    """
-    queue may be
-      • None   → only write JSON lines
-      • True   → create an in‑process Queue and expose it at `.queue`
-      • Queue  → use the queue provided by the caller
-    """
-    def __init__(self, queue: Union[None, bool, Queue[Event]] = None):
-        if queue is True:
-            queue = Queue()
-        self.queue: Optional[Queue[Event]] = queue
+_SKIP_MODULES: Set[str] = {
+    "builtins",
+    "sys",
+    "types",
+    "importlib",
+    "collections",
+    "abc",
+    "functools",
+    "inspect",
+    "posixpath",
+    "genericpath",
+    "io",
+    "logging",
+}
 
-        log_path = os.environ.get("PYXTRACE_EVENT_LOG")
-        self._fp = open(log_path, "a", buffering=1) if log_path else None
 
-    # ------------------------------------------------------------------ #
-    def start(self) -> None:
-        # ‘START’ marker so that even <1 ms scripts have at least 1 row
-        self._write({"kind": "BytecodeEvent",
-                     "ts": time.time(),
-                     "payload": {"op": "START", "offset": 0}})
-
-        sys.settrace(self._trace)          # current thread
-        threading.settrace(self._trace)    # every new thread
+class FilteredTracer:
+    def __init__(
+        self,
+        log,
+        mode: str = "full",
+        *,
+        root_path: str | Path | None = None,  # keep only this dir/file
+    ) -> None:
+        self._log = log
+        self._mode = mode
+        self._root = None if root_path is None else Path(root_path).resolve()
 
     # ------------------------------------------------------------------ #
-    def _trace(self, frame: FrameType, event: str, arg):
-        if event == "call":
-            frame.f_trace_opcodes = True
-            return self._trace
+    def __call__(self, frame: FrameType, event: str, arg) -> "FilteredTracer | None":  # noqa: D401
+        # 1) perf/demo skip list
+        if self._mode in ("perf", "demo"):
+            mod = frame.f_globals.get("__name__", "")
+            if mod.split(".", 1)[0] in _SKIP_MODULES:
+                return None
 
-        if event == "opcode":
-            code   = frame.f_code
-            offset = frame.f_lasti
-            instr  = next((i for i in dis.get_instructions(code)
-                           if i.offset == offset), None)
-
-            opname = instr.opname if instr else f"OP_{offset}"
-
-            # ---- value stack (only before the opcode runs) ------------
+        # 2) root-path filter
+        if self._root is not None:
             try:
-                val_stack = frame.stack        # CPython 3.12
-            except AttributeError:
-                val_stack = []                 # 3.13 → not available
+                fpath = Path(frame.f_code.co_filename).resolve()
+            except RuntimeError:  # built-in frames
+                return None
+            if fpath != self._root and self._root not in fpath.parents:
+                return None
 
-            ev = BytecodeEvent(
-                ts=time.time(),
-                func=code.co_name,
-                lineno=frame.f_lineno,
-                opoffset=offset,
-                opname=opname,
-                stack=[repr(x) for x in val_stack],
-            )
+        # 3) demo mode – keep only call/return
+        if self._mode == "demo" and event not in ("call", "return"):
+            return self
 
-            self._write({"kind": "BytecodeEvent", "ts": ev.ts,
-                         "payload": asdict(ev)})
+        ts_now = time.perf_counter()
+        rec: Dict[str, Any] = {
+            "ts": ts_now,
+            "kind": "BytecodeEvent",
+            "event": event,
+            "func": frame.f_code.co_name,
+            "file": frame.f_code.co_filename,
+            "line": frame.f_lineno,
+            "module": frame.f_globals.get("__name__", ""),
+        }
+        if event == "return":
+            rec["return_value"] = repr(arg)
 
-            if self.queue is not None:
-                self.queue.put(Event(ev.ts, "BytecodeEvent", asdict(ev)))
+        # inline heap snapshot
+        cur, peak = tracemalloc.get_traced_memory()
+        self._log.enqueue(
+            {
+                "kind": "MemoryEvent",
+                "ts": ts_now,
+                "payload": {"current_kb": cur // 1024, "peak_kb": peak // 1024},
+            }
+        )
 
-        return self._trace
+        self._log.enqueue(rec)
+        return self  # keep tracing nested calls
 
-    # ------------------------------------------------------------------ #
-    def _write(self, rec: dict) -> None:
-        if self._fp:
-            json.dump(rec, self._fp); self._fp.write("\n"); self._fp.flush()
+BytecodeTracer = FilteredTracer

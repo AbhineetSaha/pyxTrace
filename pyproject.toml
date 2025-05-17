@@ -1,28 +1,74 @@
 [build-system]
-requires = ["setuptools>=61.0", "dash"]
+requires      = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name            = "pyxTrace"
-version         = "1.0.0"
-description     = "Interactive Visual Tracer for Python System Calls, Bytecode and Memory"
-authors         = [{ name = "Abhineet Saha", email = "abhineetsaha.2004@gmail.com" }]
-readme          = "README.md"
-license         = { text = "MIT" }
-requires-python = ">=3.9"
+name         = "pyxtrace"
+dynamic      = ["version"]
+description  = "🩺  Your Python program under the microscope – byte-code, memory & optional syscalls, with a live Dash dashboard."
+readme       = "README.md"
+authors      = [{ name = "Abhineet Saha", email = "abhineet@example.com" }]
+license      = { file = "LICENSE" }
+requires-python = ">=3.8"
 
 dependencies = [
-    "typer[all]>=0.10.0",
-    "rich>=13.7.1",
-    "python-ptrace>=0.9.9",
-    "psutil>=5.9.8",
-    "graphviz>=0.20.1",
+    "rich>=13.0",
+    "typer>=0.9",
 ]
 
+# ---- optional extras -----------------------------------------------------
 [project.optional-dependencies]
-dash   = ["dash>=2.17.0"]
-notebook = ["ipykernel>=6.29"]
-windows  = ["pywin32>=306 ; sys_platform == 'win32'"]
+dashboard = [
+    # core UI stack (heavy, keep optional)
+    "dash>=2.15",
+    "plotly>=5.22",
+    "dash-bootstrap-components>=1.6",   # nice dark theme support
+]
+dev = [
+    "pyxtrace[dashboard]",
+    "black",
+    "ruff",
+    "mypy",
+    "pytest>=7",
+    "pre-commit",
+]
 
+# ---- entry-points --------------------------------------------------------
 [project.scripts]
-pyxtrace = "pyxtrace.cli:main"
+pyxtrace = "pyxtrace.__main__:main"
+
+# ---- classifiers (PyPI metadata) ----------------------------------------
+[project.classifiers]
+# Audience / Status
+development-status = ["Development Status :: 4 - Beta"]
+intended-audience  = [
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+]
+license            = ["License :: OSI Approved :: MIT License"]
+programming-language = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+topic = [
+  "Topic :: Software Development :: Debuggers",
+  "Topic :: System :: Monitoring",
+  "Topic :: Utilities",
+]
+
+# ---- setuptools configuration -------------------------------------------
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pyxtrace*"]
+
+# ---- version managed inside package (src/pyxtrace/__init__.py) ----------
+[tool.setuptools.dynamic]
+version = { attr = "pyxtrace.__version__" }
