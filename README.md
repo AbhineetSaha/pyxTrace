@@ -1,7 +1,3 @@
-Below is a cleaned-up **README.md** that **omits every reference to a “Restart” button** (or any other control you’ve removed).
-Copy-paste it into the project root and commit.
-
-````markdown
 <div align="center">
 
 <h1>PyXTrace<br/>
