@@ -59,8 +59,8 @@ pip install --pre pyxtrace
 ### Optional extras
 
 ```bash
-pip install "pyxtrace[dashboard]"   # Dash + Plotly live UI
-pip install "pyxtrace[dev]"         # black, ruff, mypy, pytest, …
+pip install pyxtrace               # includes the Dash dashboard
+pip install "pyxtrace[dev]"        # black, ruff, mypy, pytest, …
 ```
 
 > **Linux users** – syscall tracing needs `strace` *and* root:
@@ -131,7 +131,7 @@ src/pyxtrace/
 git clone https://github.com/AbhineetSaha/pyxtrace.git
 cd pyxtrace
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,dashboard]"
+pip install -e ".[dev]"
 pre-commit install
 ```
 

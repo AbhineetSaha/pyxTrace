@@ -52,19 +52,21 @@ class TraceVisualizer:
             return
         _DASH_RUNNING = True
 
-        dash   = importlib.import_module("dash")
-        dcc    = importlib.import_module("dash.dcc")
-        html   = importlib.import_module("dash.html")
-        deps   = importlib.import_module("dash.dependencies")
-        go     = importlib.import_module("plotly.graph_objects")
+        dash = importlib.import_module("dash")
+        dcc = importlib.import_module("dash.dcc")
+        html = importlib.import_module("dash.html")
+        deps = importlib.import_module("dash.dependencies")
+        go = importlib.import_module("plotly.graph_objects")
 
         # Try Bootstrap – fall back to plain CSS
         try:
             dbc = importlib.import_module("dash_bootstrap_components")
-            EXT = [dbc.themes.CYBORG]
+            EXT = [dbc.themes.MINTY]
         except ModuleNotFoundError:
             dbc = None
-            EXT = ["https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/cyborg/bootstrap.min.css"]
+            EXT = [
+                "https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/minty/bootstrap.min.css"
+            ]
 
         Dash = dash.Dash
         Input, Output, State = deps.Input, deps.Output, deps.State
@@ -76,16 +78,19 @@ class TraceVisualizer:
             layout=go.Layout(title_text="Heap usage (kB)", margin=dict(t=40)),
         )
         evt0 = go.Figure(
-            data=[go.Scatter(x=[], y=[], mode="lines", name="byte-code evts"),
-                  go.Scatter(x=[], y=[], mode="lines", name="syscalls")],
+            data=[
+                go.Scatter(x=[], y=[], mode="lines", name="byte-code evts"),
+                go.Scatter(x=[], y=[], mode="lines", name="syscalls"),
+            ],
             layout=go.Layout(title_text="Cumulative events", margin=dict(t=40)),
         )
 
-        cursor = [0]       # file offset
-        LINES  = [10]     # rows per tick – mutable via slider
+        cursor = [0]  # file offset
+        LINES = [10]  # rows per tick – mutable via slider
 
-        app = Dash(__name__, external_stylesheets=EXT,
-                   suppress_callback_exceptions=True)
+        app = Dash(
+            __name__, external_stylesheets=EXT, suppress_callback_exceptions=True
+        )
 
         # ---------- Layout -------------------------------------------------
         def card_body(text):
@@ -93,76 +98,122 @@ class TraceVisualizer:
 
         header = (
             dbc.Navbar(dbc.Container(dbc.NavbarBrand(self.path.name, className="fs-5")))
-            if dbc else
-            html.Div(self.path.name, style={"fontWeight": "600",
-                                            "padding": "8px 14px"})
+            if dbc
+            else html.Div(
+                self.path.name, style={"fontWeight": "600", "padding": "8px 14px"}
+            )
         )
         controls = (
             dbc.Row(
                 [
-                    dbc.Col(dbc.Button("▶ Start", id="start",
-                                       color="success", className="me-2")),
-                    dbc.Col(dbc.Button("▶ Restart", id="restart",
-                                       color="success", className="me-2")),
                     dbc.Col(
-                        dcc.Slider(id="speed", min=10, max=500, step=10,
-                                   value=100, tooltip={"placement": "bottom"},
-                                   marks=None)
+                        dbc.Button(
+                            "▶ Start", id="start", color="success", className="me-2"
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Button(
+                            "▶ Restart", id="restart", color="success", className="me-2"
+                        )
+                    ),
+                    dbc.Col(
+                        dcc.Slider(
+                            id="speed",
+                            min=10,
+                            max=500,
+                            step=10,
+                            value=100,
+                            tooltip={"placement": "bottom"},
+                            marks=None,
+                        )
                     ),
                 ],
-                className="gx-2 gy-1 flex-nowrap"
+                className="gx-2 gy-1 flex-nowrap",
             )
-            if dbc else
-            html.Div(
+            if dbc
+            else html.Div(
                 [
-                    html.Button("▶ Start", id="start",
-                                style={"padding": "6px 18px",
-                                       "marginRight": "10px"}),
-                    dcc.Slider(id="speed", min=10, max=500, step=10,
-                               value=100, tooltip={"placement": "bottom"})
+                    html.Button(
+                        "▶ Start",
+                        id="start",
+                        style={"padding": "6px 18px", "marginRight": "10px"},
+                    ),
+                    dcc.Slider(
+                        id="speed",
+                        min=10,
+                        max=500,
+                        step=10,
+                        value=100,
+                        tooltip={"placement": "bottom"},
+                    ),
                 ],
-                style={"display": "flex", "alignItems": "center",
-                       "gap": "8px", "padding": "6px 14px"}
+                style={
+                    "display": "flex",
+                    "alignItems": "center",
+                    "gap": "8px",
+                    "padding": "6px 14px",
+                },
             )
         )
-        stats_box = html.Pre(id="info",
-                             style={"background": "#111", "color": "#0f0",
-                                    "padding": "6px", "fontSize": "14px",
-                                    "minHeight": "38px"})
+        stats_box = html.Pre(
+            id="info",
+            style={
+                "background": "#111",
+                "color": "#0f0",
+                "padding": "6px",
+                "fontSize": "14px",
+                "minHeight": "38px",
+            },
+        )
 
         graph_row = (
             dbc.Row(
                 [
-                    dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="heap", figure=heap0)),
-                                     className="mb-2"), lg=6),
-                    dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="evt", figure=evt0)),
-                                     className="mb-2"), lg=6),
+                    dbc.Col(
+                        dbc.Card(
+                            dbc.CardBody(dcc.Graph(id="heap", figure=heap0)),
+                            className="mb-2",
+                        ),
+                        lg=6,
+                    ),
+                    dbc.Col(
+                        dbc.Card(
+                            dbc.CardBody(dcc.Graph(id="evt", figure=evt0)),
+                            className="mb-2",
+                        ),
+                        lg=6,
+                    ),
                 ],
-                className="gx-2"
+                className="gx-2",
             )
-            if dbc else
-            html.Div(
+            if dbc
+            else html.Div(
                 [
-                    html.Div(dcc.Graph(id="heap", figure=heap0),
-                             style={"width": "50%", "padding": "4px"}),
-                    html.Div(dcc.Graph(id="evt", figure=evt0),
-                             style={"width": "50%", "padding": "4px"}),
+                    html.Div(
+                        dcc.Graph(id="heap", figure=heap0),
+                        style={"width": "50%", "padding": "4px"},
+                    ),
+                    html.Div(
+                        dcc.Graph(id="evt", figure=evt0),
+                        style={"width": "50%", "padding": "4px"},
+                    ),
                 ],
-                style={"display": "flex", "flexWrap": "wrap"}
+                style={"display": "flex", "flexWrap": "wrap"},
             )
         )
 
-        app.layout = html.Div(
-            [
-                header,
-                controls,
-                stats_box,
-                graph_row,
-                dcc.Store(id="running", data=False),
-                dcc.Interval(id="tick", interval=1_000, n_intervals=0,
-                             disabled=True),
-            ],
-            style={"padding": "8px"} if not dbc else {}
+        content = [
+            header,
+            controls,
+            stats_box,
+            graph_row,
+            dcc.Store(id="running", data=False),
+            dcc.Interval(id="tick", interval=1_000, n_intervals=0, disabled=True),
+        ]
+        app.layout = (
+            dbc.Container(content, fluid=True)
+            if dbc
+            else html.Div(content, style={"padding": "8px"})
         )
 
         # ---------- Callbacks ----------------------------------------------
@@ -181,10 +232,10 @@ class TraceVisualizer:
         # ▶ Start
         @app.callback(
             Output("running", "data", allow_duplicate=True),
-            Output("tick",    "disabled", allow_duplicate=True),
-            Output("tick",    "n_intervals", allow_duplicate=True),
-            Input("start",    "n_clicks"),
-            State("running",  "data"),
+            Output("tick", "disabled", allow_duplicate=True),
+            Output("tick", "n_intervals", allow_duplicate=True),
+            Input("start", "n_clicks"),
+            State("running", "data"),
             prevent_initial_call=True,
         )
         def _start(_, running):
@@ -193,39 +244,26 @@ class TraceVisualizer:
         # ─────────── Restart button (rewind + pause) ─────────── #
         @app.callback(
             Output("running", "data", allow_duplicate=True),
-            Output("tick",    "disabled", allow_duplicate=True),
-            Output("tick",    "n_intervals", allow_duplicate=True),   # ← add this
-            Input("restart",  "n_clicks"),
+            Output("tick", "disabled", allow_duplicate=True),
+            Output("tick", "n_intervals", allow_duplicate=True),  # reset interval
+            Input("restart", "n_clicks"),
             prevent_initial_call=True,
         )
         def _restart(_):
             cursor[0] = 0  # rewind JSONL to the beginning
 
-            # Clean the graphs by resetting their data
-            # This will be picked up by the next _update call
-            heap0 = go.Figure(
-            data=[go.Scatter(x=[], y=[], mode="lines", name="heap (kB)")],
-            layout=go.Layout(title_text="Heap usage (kB)", margin=dict(t=40)),
-            )
-            evt0 = go.Figure(
-            data=[go.Scatter(x=[], y=[], mode="lines", name="byte-code evts"),
-                  go.Scatter(x=[], y=[], mode="lines", name="syscalls")],
-            layout=go.Layout(title_text="Cumulative events", margin=dict(t=40)),
-            )
+            # Reset running state and interval; graphs will be cleared on next update
+            return False, True, 0
 
-            # Optionally, you can store these in dcc.Store or reset via callback outputs
-            # But here, just return to reset running state and interval
-            return False, True, 0 
-        
         # Live update
         @app.callback(
             Output("heap", "figure"),
-            Output("evt",  "figure"),
+            Output("evt", "figure"),
             Output("info", "children"),
-            Input("tick",  "n_intervals"),
+            Input("tick", "n_intervals"),
             State("running", "data"),
             State("heap", "figure"),
-            State("evt",  "figure"),
+            State("evt", "figure"),
         )
         def _update(_, running, hfig, efig):
             if not running:
@@ -235,8 +273,8 @@ class TraceVisualizer:
             bcx, bcy = efig["data"][0]["x"], efig["data"][0]["y"]
             scx, scy = efig["data"][1]["x"], efig["data"][1]["y"]
             heap = hy[-1] if hy else 0
-            bc   = bcy[-1] if bcy else 0
-            sc   = scy[-1] if scy else 0
+            bc = bcy[-1] if bcy else 0
+            sc = scy[-1] if scy else 0
 
             added = 0
             with self.path.open() as fp:
@@ -250,13 +288,16 @@ class TraceVisualizer:
                     k, ts = ev.get("kind"), ev.get("ts")
                     if k == "MemoryEvent":
                         heap = ev["payload"]["current_kb"]
-                        hx.append(ts); hy.append(heap)
+                        hx.append(ts)
+                        hy.append(heap)
                     elif k == "BytecodeEvent":
                         bc += 1
-                        bcx.append(ts); bcy.append(bc)
+                        bcx.append(ts)
+                        bcy.append(bc)
                     elif k == "SyscallEvent":
                         sc += ev["payload"].get("count", 1)
-                        scx.append(ts); scy.append(sc)
+                        scx.append(ts)
+                        scy.append(sc)
                 cursor[0] = fp.tell()
 
             heap_fig = go.Figure(
