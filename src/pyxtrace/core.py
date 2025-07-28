@@ -1,5 +1,5 @@
 """
-core.py – orchestrates tracing + optional Dash dashboard replay.
+core.py – orchestrates tracing + optional Streamlit dashboard replay.
 """
 
 from __future__ import annotations
@@ -128,6 +128,7 @@ class TraceSession:
         sys.settrace(tracer)
 
         spec = importlib.util.spec_from_file_location("__main__", self.script_path)
+        assert spec is not None
         mod: ModuleType = importlib.util.module_from_spec(spec)
         sys.modules["__main__"] = mod
         try:
@@ -157,7 +158,7 @@ class TraceSession:
             )
             dash_proc.start()
 
-            print("[pyxTrace] dashboard: http://127.0.0.1:8050  (CTRL-C to stop)")
+            print("[pyxTrace] Streamlit dashboard: http://127.0.0.1:8050  (CTRL-C to stop)")
             try:
                 while dash_proc.is_alive():
                     time.sleep(0.5)

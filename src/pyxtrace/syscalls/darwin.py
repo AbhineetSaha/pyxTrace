@@ -40,6 +40,7 @@ class SyscallTracer(SyscallTracerBase):
             child = sp.Popen(self.command)
             target_pid = child.pid
         else:
+            assert self.pid is not None
             target_pid = self.pid
 
         # 2. attach with dtruss (-f follow forks, -t enables timestamps)
@@ -68,7 +69,13 @@ class SyscallTracer(SyscallTracerBase):
                 raw=line.rstrip(),
             )
             if self.queue:
-                self.queue.put(Event(ev.ts, "syscall", asdict(ev)))
+                self.queue.put(
+                    {
+                        "ts": ev.ts,
+                        "kind": "syscall",
+                        "payload": asdict(ev),
+                    }
+                )
 
         proc.wait()
         if self.command:

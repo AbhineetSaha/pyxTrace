@@ -15,7 +15,7 @@ import tracemalloc
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from queue import Queue
-from typing import Optional, TypedDict, TYPE_CHECKING
+from typing import Optional, TypedDict, TYPE_CHECKING, TypeAlias
 
 
 class _Event(TypedDict, total=False):
@@ -24,7 +24,10 @@ class _Event(TypedDict, total=False):
     payload: dict
 
 
-Event = _Event if TYPE_CHECKING else dict
+if TYPE_CHECKING:
+    Event: TypeAlias = _Event
+else:
+    Event = dict
 
 
 @dataclass

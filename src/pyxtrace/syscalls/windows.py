@@ -17,7 +17,10 @@ class SyscallTracer(SyscallTracerBase):
         # Poor‑man's placeholder: emit a single warning event then exit.
         if self.queue:
             self.queue.put(
-                Event(time(), "warning",
-                      {"msg": "Windows syscall tracing not yet implemented"})
+                {
+                    "ts": time(),
+                    "kind": "warning",
+                    "payload": {"msg": "Windows syscall tracing not yet implemented"},
+                }
             )
         sleep(0.1)

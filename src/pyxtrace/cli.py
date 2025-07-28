@@ -4,7 +4,7 @@ pyxTrace command-line interface
 Usage examples
 --------------
 
-# Original depth, live dashboard
+# Original depth, live Streamlit dashboard
 pyxtrace examples/fibonacci.py --dash
 
 # Faster: skip std-lib lines but keep line-level detail
@@ -59,7 +59,7 @@ def run(
         help="Optional JSONL output file (default ./pyxtrace-<ts>.jsonl)",
     ),
     dash: bool = typer.Option(
-        False, "--dash", help="Launch live dashboard after tracing finishes"
+        False, "--dash", help="Launch live Streamlit dashboard after tracing finishes"
     )
 ):
     

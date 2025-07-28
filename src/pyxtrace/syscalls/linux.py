@@ -48,5 +48,11 @@ class SyscallTracer(SyscallTracerBase):
                 raw=line.rstrip(),
             )
             if self.queue:
-                self.queue.put(Event(ev.ts, "syscall", asdict(ev)))
+                self.queue.put(
+                    {
+                        "ts": ev.ts,
+                        "kind": "syscall",
+                        "payload": asdict(ev),
+                    }
+                )
         proc.wait()
