@@ -12,7 +12,7 @@
   <a href="https://pepy.tech/projects/pyxtrace"><img alt="Downloads" src="https://img.shields.io/pypi/dm/pyxtrace?style=for-the-badge"></a>
 </p>
 
-<sup>Byte-code • Memory • (optional) Sys-call tracing &nbsp;|&nbsp; Rich CLI + live Dash dashboard</sup>
+<sup>Byte-code • Memory • (optional) Sys-call tracing &nbsp;|&nbsp; Rich CLI + live Streamlit dashboard</sup>
 
 <br/>
 <a href="#-quick-start"><img src="./Demo.gif" alt="Demo animation" width="760"></a>
@@ -34,7 +34,7 @@
 
 ## ✨ Features
 
-| 🔍 What you see           | 💡 Captured via            | 📈 Visualised as (Dash) |
+| 🔍 What you see           | 💡 Captured via            | 📈 Visualised as (Streamlit) |
 |---------------------------|---------------------------|-------------------------|
 | **Byte-code timeline**    | `sys.settrace`            | Cumulative line graph   |
 | **Heap usage (kB)**       | `tracemalloc` snapshots   | Live line graph         |
@@ -59,7 +59,7 @@ pip install --pre pyxtrace
 ### Optional extras
 
 ```bash
-pip install pyxtrace               # includes the Dash dashboard
+pip install pyxtrace               # includes the Streamlit dashboard
 pip install "pyxtrace[dev]"        # black, ruff, mypy, pytest, …
 ```
 
@@ -107,7 +107,7 @@ src/pyxtrace/
 ├─ bytecode.py      ← byte-code tracer
 ├─ memory.py        ← heap sampler (tracemalloc)
 ├─ syscalls/        ← syscall tracer (Linux / Darwin stubs)
-├─ visual.py        ← Rich summary + Dash dashboard
+├─ visual.py        ← Rich summary + Streamlit dashboard
 └─ …
 ```
 
@@ -121,7 +121,7 @@ src/pyxtrace/
 |   🔄   | CPU sample profiler (`perf` hook)      |
 |   🔄   | Remote dashboard via websockets        |
 |   🔄   | VS Code extension                      |
-|   🕓   | **Streamlit dashboard (next release)** |
+|   ✅   | **Streamlit dashboard** |
 
 ---
 
@@ -152,7 +152,7 @@ Released under the **MIT License** – see [`LICENSE`](LICENSE).
 | Project / Lib     | Why it’s awesome                             |
 | ----------------- | -------------------------------------------- |
 | **Rich & Typer**  | Beautiful CLIs with zero boiler-plate        |
-| **Dash / Plotly** | Interactive dashboards in pure Python        |
+| **Streamlit & Plotly** | Interactive dashboards in pure Python        |
 | **tracemalloc**   | Built-in heap sampler, criminally underrated |
 | **strace**        | Decades-old yet still magical                |
 

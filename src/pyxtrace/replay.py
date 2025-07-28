@@ -48,7 +48,7 @@ def run(
 ):
     """
     Stream TRACE.jsonl to a *temporary* file at the chosen FPS and launch the
-    live Dash dashboard to visualize it.
+    live Streamlit dashboard to visualize it.
     """
     delay = 1.0 / max(fps, 1e-3)
 

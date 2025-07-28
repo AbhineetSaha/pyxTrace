@@ -1,5 +1,5 @@
 """
-core.py – orchestrates tracing + optional Dash dashboard replay.
+core.py – orchestrates tracing + optional Streamlit dashboard replay.
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ class TraceSession:
             )
             dash_proc.start()
 
-            print("[pyxTrace] dashboard: http://127.0.0.1:8050  (CTRL-C to stop)")
+            print("[pyxTrace] Streamlit dashboard: http://127.0.0.1:8050  (CTRL-C to stop)")
             try:
                 while dash_proc.is_alive():
                     time.sleep(0.5)
