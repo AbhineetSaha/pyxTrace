@@ -21,7 +21,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pyxtrace")           # installed dist
 except PackageNotFoundError:                    # editable / source checkout
-    __version__ = "1.1.0"
+    __version__ = "1.2.0"
 
 # --------------------------------------------------------------------------- #
 #  ▄▄▄  We must import `core` FIRST so the Event dataclass already exists     #
