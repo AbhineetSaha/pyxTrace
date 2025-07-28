@@ -147,7 +147,10 @@ def _streamlit_main(path: str) -> None:
         info_box.write(f"heap {heap/1024:.2f} MB | byte-code {bc} | syscalls {sc}")
 
         time.sleep(1.0)
-        st.experimental_rerun()
+        if hasattr(st, "rerun"):
+            st.rerun()
+        else:  # pragma: no cover - fallback for old Streamlit
+            st.experimental_rerun()
     else:
         if st.session_state.hy or st.session_state.bcy:
             heap_fig = go.Figure(
