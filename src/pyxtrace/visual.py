@@ -59,7 +59,7 @@ class TraceVisualizer:
 
 # ------------------------ Streamlit dashboard ------------------------ #
 def _streamlit_main(path: str) -> None:
-    import plotly.graph_objects as go
+    import plotly.graph_objects as go  # type: ignore[import]
     import streamlit as st
 
     trace_path = Path(path)
@@ -150,7 +150,7 @@ def _streamlit_main(path: str) -> None:
         if hasattr(st, "rerun"):
             st.rerun()
         else:  # pragma: no cover - fallback for old Streamlit
-            st.experimental_rerun()
+            st.experimental_rerun()  # type: ignore[attr-defined]
     else:
         if st.session_state.hy or st.session_state.bcy:
             heap_fig = go.Figure(

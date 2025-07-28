@@ -128,6 +128,7 @@ class TraceSession:
         sys.settrace(tracer)
 
         spec = importlib.util.spec_from_file_location("__main__", self.script_path)
+        assert spec is not None
         mod: ModuleType = importlib.util.module_from_spec(spec)
         sys.modules["__main__"] = mod
         try:
