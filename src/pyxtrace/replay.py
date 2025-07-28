@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import json
 import shutil
-import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterator
 
 import typer
 from pyxtrace.visual import serve_dashboard
@@ -74,9 +73,11 @@ def run(
 
     try:
         while True:
-            for raw in _iter_events(trace):
-                stream_path.write_text(raw, encoding="utf-8", append=True)
-                time.sleep(delay)
+            with stream_path.open("a", encoding="utf-8") as fp_dst:
+                for raw in _iter_events(trace):
+                    fp_dst.write(raw)
+                    fp_dst.flush()
+                    time.sleep(delay)
             if not loop:
                 break
     except KeyboardInterrupt:
