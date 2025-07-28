@@ -136,7 +136,7 @@ pre-commit install
 ```
 
 1. Create a feature branch from **main**
-2. Run `pytest -q && ruff check . && mypy src/`
+2. Run `./dev_check.py` to execute the test suite and linters
 3. Open a pull-request ❤️
 
 ---
