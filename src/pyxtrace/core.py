@@ -31,22 +31,31 @@ class _AsyncLog:
         self._q: SimpleQueue = SimpleQueue()
         self._f = self._path.open("a", buffering=1)
         self._period = flush_ms / 1_000
-        threading.Thread(target=self._writer, daemon=True).start()
+        self._thread = threading.Thread(target=self._writer, daemon=True)
+        self._thread.start()
 
     def enqueue(self, obj: dict) -> None:
         self._q.put_nowait(obj)
 
     def close(self) -> None:
         self._q.put_nowait(self._END)
+        # wait for the drain: callers read the file as soon as this returns
+        self._thread.join()
 
     def _writer(self) -> None:
-        while (item := self._q.get()) is not self._END:
+        ended = False
+        while not ended:
+            item = self._q.get()
+            if item is self._END:
+                break
             self._f.write(json.dumps(item, default=str) + "\n")
             t0 = time.perf_counter()
             while (time.perf_counter() - t0) < self._period and not self._q.empty():
                 nxt = self._q.get_nowait()
                 if nxt is self._END:
-                    item = self._END
+                    # consumed here, so the outer get() must not run again:
+                    # on an empty queue it would block for ever
+                    ended = True
                     break
                 self._f.write(json.dumps(nxt, default=str) + "\n")
         self._f.flush()

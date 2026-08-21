@@ -1,4 +1,5 @@
 import json
+import tracemalloc
 from pathlib import Path
 
 import pyxtrace.core as core
@@ -153,3 +154,54 @@ def test_root_traces_a_library_outside_the_script_directory(tmp_path: Path) -> N
     on = runfile.load(tmp_path / "on.pyxt")["functions"]
     assert not any(k.startswith("mylib.py") for k in off)
     assert on["mylib.py::work"]["calls"] == 1
+
+
+def _events(log_path: Path) -> list[dict]:
+    return [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
+
+
+def test_return_values_are_captured_when_asked(tmp_path: Path) -> None:
+    """The opt-in is what turns return values on; the default test covers off."""
+    script = tmp_path / "answer.py"
+    script.write_text("def answer():\n    return 42\n\nanswer()\n")
+    log_path = tmp_path / "trace.jsonl"
+
+    core.TraceSession(
+        script, log_path=log_path, events=True, mode="demo", capture_returns=True
+    ).run()
+
+    assert any(e.get("return_value") == "42" for e in _events(log_path))
+
+
+def test_memory_sampling_emits_events_and_leaves_tracemalloc_off(tmp_path: Path) -> None:
+    """A memory run starts tracemalloc, so it has to stop it again."""
+    script = tmp_path / "alloc.py"
+    script.write_text("data = [0] * 4096\n")
+    log_path = tmp_path / "trace.jsonl"
+
+    core.TraceSession(script, log_path=log_path, events=True, memory=True).run()
+
+    assert any(e.get("kind") == "MemoryEvent" for e in _events(log_path))
+    assert not tracemalloc.is_tracing()
+
+
+def test_memory_tracer_used_directly_does_not_need_tracemalloc() -> None:
+    """FilteredTracer is public; memory=True must degrade, not raise."""
+    import sys
+
+    from pyxtrace.bytecode import FilteredTracer
+
+    class _Log:
+        def __init__(self) -> None:
+            self.rows: list[dict] = []
+
+        def enqueue(self, obj: dict) -> None:
+            self.rows.append(obj)
+
+    assert not tracemalloc.is_tracing()
+    log = _Log()
+    # no root_path, so every frame is kept and the memory branch is reached
+    FilteredTracer(log, mode="full", memory=True)(sys._getframe(), "line", None)
+
+    assert log.rows, "the line event itself should still be recorded"
+    assert not any(r.get("kind") == "MemoryEvent" for r in log.rows)
