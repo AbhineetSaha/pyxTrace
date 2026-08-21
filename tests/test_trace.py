@@ -115,3 +115,22 @@ def test_return_values_are_not_captured_by_default(tmp_path: Path) -> None:
 
     assert "return_value" not in log_path.read_text()
 
+
+def test_script_can_import_a_sibling_module(tmp_path: Path) -> None:
+    """`python app.py` puts the script's dir on sys.path — pyxtrace must too."""
+    (tmp_path / "helper.py").write_text("VALUE = 42\n")
+    app = tmp_path / "app.py"
+    app.write_text("import helper\nassert helper.VALUE == 42\n")
+
+    core.run_tracer(app, out=tmp_path / "run.pyxt")  # raised ModuleNotFoundError before
+
+    data = runfile.load(tmp_path / "run.pyxt")
+    assert "helper.py::<module>" in data["functions"]
+
+
+def test_warns_when_only_the_entry_script_was_traced(capsys) -> None:
+    """An out-of-tree library records nothing; that must not look like success."""
+    from pyxtrace.visual import render_run
+
+    render_run({"script": "app.py", "functions": {"app.py::<module>": {"calls": 1, "lines": 3, "own_time": 0.0}}})
+    assert "only the entry script was traced" in capsys.readouterr().out.lower()

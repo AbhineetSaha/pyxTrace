@@ -45,6 +45,17 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
         f"[dim]{len(functions)} functions · sorted by lines executed "
         f"(deterministic) · own ms is timing, and varies run to run[/]"
     )
+    # The entry script is always traced, so the "no functions" case above never
+    # fires for the common real failure: an installed or out-of-tree library
+    # sits outside the script's directory and is filtered out silently.
+    if {name.split("::", 1)[0] for name in functions} <= {run.get("script", "")}:
+        c.print(
+            "[yellow]Warning: only the entry script was traced.[/] pyxTrace "
+            "profiles code under the script's own directory, so a library "
+            "installed in site-packages or living outside that directory "
+            "recorded nothing. This run is effectively empty — a baseline "
+            "saved from it will never detect a regression."
+        )
     if path:
         c.print(f"[dim]run saved to {path}[/]")
 

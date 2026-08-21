@@ -76,6 +76,9 @@ class TraceSession:
     # ------------------------------------------------------------------ #
     def _exec_script(self, tracer) -> None:
         """Run the target script under *tracer*."""
+        # CPython puts the script's directory on sys.path for `python app.py`;
+        # without this, any script importing a sibling module fails under pyxtrace.
+        sys.path.insert(0, str(self.script_path.parent))
         spec = importlib.util.spec_from_file_location("__main__", self.script_path)
         assert spec is not None
         mod: ModuleType = importlib.util.module_from_spec(spec)
