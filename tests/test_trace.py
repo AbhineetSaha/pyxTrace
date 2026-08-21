@@ -26,18 +26,21 @@ def test_profile_run_counts_are_exact(tmp_path: Path) -> None:
 
 
 def test_profile_run_is_byte_stable(tmp_path: Path) -> None:
-    """Unchanged code must produce an identical run file, timing aside."""
-
-    def counts(path: Path) -> str:
-        data = runfile.load(path)
-        for fn in data["functions"].values():
-            fn.pop("own_time")
-        return json.dumps(data, sort_keys=True)
-
+    """Unchanged code must produce a byte-identical run file, so a committed
+    baseline shows no git diff until the code actually changes."""
     a, b = tmp_path / "a.pyxt", tmp_path / "b.pyxt"
     core.run_tracer(EXAMPLE, out=a)
     core.run_tracer(EXAMPLE, out=b)
-    assert counts(a) == counts(b)
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_run_file_carries_no_timing(tmp_path: Path) -> None:
+    """own_time varies every run; in a committed artifact it is pure churn."""
+    out = tmp_path / "run.pyxt"
+    core.run_tracer(EXAMPLE, out=out)
+
+    assert "own_time" not in out.read_text()
+    assert all("own_time" not in fn for fn in runfile.load(out)["functions"].values())
 
 
 def test_event_stream_still_writes_jsonl(tmp_path: Path) -> None:
@@ -74,32 +77,21 @@ def test_diff_is_clean_against_itself(tmp_path: Path) -> None:
     assert runfile.diff(baseline, baseline) == []
 
 
-def test_diff_catches_the_n_plus_one(tmp_path: Path) -> None:
+def test_diff_reports_the_per_item_query_regression(tmp_path: Path) -> None:
+    """Switching to a per-order lookup is extra work, and must be reported."""
     before = _orders_run(tmp_path, "before.pyxt", n_plus_one=False)
     after = _orders_run(tmp_path, "after.pyxt", n_plus_one=True)
 
     findings = runfile.diff(before, after)
-    assert findings, "the N+1 regression should be reported"
+    assert findings, "the extra per-order queries should be reported"
 
-    # the introduction point ranks first, not the downstream query function
-    top_finding = findings[0]
-    assert top_finding["name"] == "orders.py::process_order"
+    by_name = {f["name"]: f for f in findings}
+    assert "orders.py::process_order" in by_name
 
-    npo = top_finding["n_plus_one"]
-    assert npo is not None
-    assert npo["callee"] == "orders.py::fetch_customer"
-    assert npo["parent_calls"] == 120
-    assert npo["total_after"] == 120
-    assert npo["total_before"] == 0
-
-
-def test_diff_does_not_blame_downstream_callees(tmp_path: Path) -> None:
-    """fetch_customer runs more because its caller does — that is not its N+1."""
-    before = _orders_run(tmp_path, "before.pyxt", n_plus_one=False)
-    after = _orders_run(tmp_path, "after.pyxt", n_plus_one=True)
-
-    by_name = {f["name"]: f for f in runfile.diff(before, after)}
-    assert by_name["orders.py::fetch_customer"]["n_plus_one"] is None
+    # the growth is attributed to the call that caused it
+    callees = {c["name"]: c for c in by_name["orders.py::process_order"]["callees"]}
+    fetch = callees["orders.py::fetch_customer"]
+    assert (fetch["before"], fetch["after"]) == (0, 120)
 
 
 def test_diff_ignores_small_changes() -> None:
@@ -205,3 +197,31 @@ def test_memory_tracer_used_directly_does_not_need_tracemalloc() -> None:
 
     assert log.rows, "the line event itself should still be recorded"
     assert not any(r.get("kind") == "MemoryEvent" for r in log.rows)
+
+
+def test_threads_are_traced_and_stay_deterministic(tmp_path: Path) -> None:
+    """sys.settrace is per-thread: without threading.settrace a worker is invisible,
+    and a shared call stack would interleave frames from different threads."""
+    script = tmp_path / "threaded.py"
+    script.write_text(
+        "import threading\n"
+        "def work():\n"
+        "    total = 0\n"
+        "    for i in range(50):\n"
+        "        total += i\n"
+        "    return total\n"
+        "ts = [threading.Thread(target=work) for _ in range(4)]\n"
+        "for t in ts:\n"
+        "    t.start()\n"
+        "for t in ts:\n"
+        "    t.join()\n"
+    )
+
+    a, b = tmp_path / "a.pyxt", tmp_path / "b.pyxt"
+    core.run_tracer(script, out=a)
+    core.run_tracer(script, out=b)
+
+    fns = runfile.load(a)["functions"]
+    assert fns["threaded.py::work"]["calls"] == 4
+    # scheduling varies between runs; which lines each thread runs does not
+    assert a.read_bytes() == b.read_bytes()

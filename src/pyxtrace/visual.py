@@ -37,7 +37,7 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
             name,
             f"{s['calls']:,}",
             f"{s['lines']:,}",
-            f"{s['own_time'] * 1e3:.1f}",
+            f"{s.get('own_time', 0.0) * 1e3:.1f}",
         )
 
     c.print(tbl)
@@ -87,6 +87,18 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
             detail = f"[red]+{added:,} calls to other functions[/]  [dim](same code, more work)[/]"
         c.print(f"\n[bold red]⚠[/]  [bold]{f['name']}[/]  {detail}")
 
+        # State the rate, not a diagnosis. Whether this is an N+1 or simply more
+        # work per call cannot be told apart at one input size, so pyxtrace
+        # reports the counts and leaves the reading to the author.
+        if f.get("delegated") and f["callees"] and f["calls_after"]:
+            top = max(f["callees"], key=lambda r: r["after"] - r["before"])
+            per_call = (top["after"] - top["before"]) / f["calls_after"]
+            c.print(
+                f"   [yellow]{f['name'].split('::')[-1]}() runs {f['calls_after']:,}x[/]"
+                f" and makes [bold]{per_call:,.0f} more call(s) to "
+                f"{top['name'].split('::')[-1]}()[/] each time"
+            )
+
         if f["callees"]:
             c.print("   [dim]Attributed to:[/]")
             for row in f["callees"][:5]:
@@ -95,24 +107,7 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
                     f"   [dim]{_fmt_pct(row['pct'])}[/]"
                 )
 
-        npo = f["n_plus_one"]
-        if npo:
-            caller = f["name"].split("::")[-1]
-            callee = npo["callee"].split("::")[-1]
-            c.print(
-                f"   [yellow]Pattern detected: N+1[/] — {caller}() runs "
-                f"{npo['parent_calls']:,}x and calls {callee}() "
-                f"[bold]{npo['per_call_after']:.0f}x each[/]"
-            )
-            c.print(
-                f"     [dim]{npo['total_after']:,} total calls to {callee}(), "
-                f"was {npo['total_before']:,}. Batch it outside the loop.[/]"
-            )
-
-    c.print(
-        f"\n[bold red]✗ FAIL[/] — {len(findings)} function(s) grew by more than "
-        f"{threshold:g}%"
-    )
+    c.print(f"\n[bold red]✗ FAIL[/] — {len(findings)} function(s) regressed")
 
 
 # ───────────────────────────── CLI summary ───────────────────────────
