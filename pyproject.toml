@@ -1,17 +1,20 @@
 [project]
 name            = "pyxtrace"
-version         = "1.2.0"
-description     = "🩺  Your Python program under the microscope – byte-code, memory & optional syscalls, with a live Streamlit dashboard."
+version         = "2.0.0"
+description     = "Catch Python performance regressions in CI using deterministic operation counts instead of flaky wall-clock timing."
 readme          = "README.md"
-authors         = [{ name = "Abhineet Saha", email = "abhineet@example.com" }]
+authors         = [{ name = "Abhineet Saha" }]
 license         = { file = "LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 dependencies = [
     "rich>=13.0",
     "typer>=0.9",
-    "streamlit>=1.25",
-    "plotly>=5.22",
+]
+
+keywords = [
+    "profiling", "performance", "regression", "regression-testing",
+    "ci", "benchmark", "tracing", "profiler", "n+1",
 ]
 
 classifiers = [
@@ -21,15 +24,20 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Debuggers",
     "Topic :: System :: Monitoring",
     "Topic :: Utilities",
 ]
+
+[project.urls]
+Homepage      = "https://github.com/AbhineetSaha/pyxTrace"
+Repository    = "https://github.com/AbhineetSaha/pyxTrace"
+Issues        = "https://github.com/AbhineetSaha/pyxTrace/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -38,7 +46,6 @@ dev = [
     "mypy",
     "pytest>=7",
     "pre-commit",
-    "types-psutil",
 ]
 
 [project.scripts]

@@ -1,5 +1,7 @@
 dist/
+build/
 *.egg-info
 __pycache__/
 .pypirc
 pyxtrace-*.jsonl
+*.pyxt

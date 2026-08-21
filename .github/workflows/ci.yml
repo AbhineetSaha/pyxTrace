@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Tests
+        run: pytest -q
+
+      - name: Overhead + determinism gate
+        run: python benchmarks/overhead.py
+
+      - name: Import must not start tracemalloc
+        run: |
+          python -c "
+          import pyxtrace, tracemalloc
+          assert not tracemalloc.is_tracing(), 'importing pyxtrace started tracemalloc'
+          "
+
+      - name: Dashboard deps must not be pulled in
+        run: |
+          python - <<'EOF'
+          import importlib.util, sys
+          for mod in ("streamlit", "plotly", "pandas", "pyarrow"):
+              if importlib.util.find_spec(mod) is not None:
+                  sys.exit(f"{mod} should not be installed by pyxtrace")
+          print("install is lean")
+          EOF
+
+      - name: The gate must actually catch the example N+1
+        run: |
+          pyxtrace examples/orders.py -o before.pyxt
+          PYXTRACE_NPLUSONE=1 pyxtrace examples/orders.py -o after.pyxt
+          if pyxtrace diff before.pyxt after.pyxt; then
+            echo "::error::diff exited 0 but should have caught the N+1"
+            exit 1
+          fi
+          echo "regression correctly detected"
