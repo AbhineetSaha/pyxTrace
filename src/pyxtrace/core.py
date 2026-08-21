@@ -90,16 +90,22 @@ class TraceSession:
         """Run the target script under *tracer*."""
         # CPython puts the script's directory on sys.path for `python app.py`;
         # without this, any script importing a sibling module fails under pyxtrace.
-        sys.path.insert(0, str(self.script_path.parent))
-        spec = importlib.util.spec_from_file_location("__main__", self.script_path)
-        assert spec is not None
-        mod: ModuleType = importlib.util.module_from_spec(spec)
-        sys.modules["__main__"] = mod
-        sys.settrace(tracer)
+        script_dir = str(self.script_path.parent)
+        sys.path.insert(0, script_dir)
         try:
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            spec = importlib.util.spec_from_file_location("__main__", self.script_path)
+            assert spec is not None
+            mod: ModuleType = importlib.util.module_from_spec(spec)
+            sys.modules["__main__"] = mod
+            sys.settrace(tracer)
+            try:
+                spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            finally:
+                sys.settrace(None)
         finally:
-            sys.settrace(None)
+            # embedders keep running after us; leave their sys.path as we found it
+            if sys.path and sys.path[0] == script_dir:
+                del sys.path[0]
 
     # ------------------------------------------------------------------ #
     def run(self) -> None:
@@ -154,6 +160,8 @@ class TraceSession:
             self._exec_script(tracer)
         finally:
             log.close()
+            if self.memory:
+                tracemalloc.stop()  # we started it; don't leave it on
             print("[pyxTrace] ✔ finished")
 
         TraceVisualizer.from_jsonl(self.log_path).render()

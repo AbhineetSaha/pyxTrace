@@ -118,7 +118,9 @@ class FilteredTracer:
             rec["return_value"] = repr(arg)
 
         # inline heap snapshot (opt-in: costs ~8x on the hot path)
-        if self._memory:
+        # is_tracing(): FilteredTracer is public, and a caller who builds one
+        # directly may not have started tracemalloc. Skip rather than raise.
+        if self._memory and tracemalloc.is_tracing():
             # ponytail: one snapshot per event is wasteful — the value moves far
             # slower than the event rate. Sample on an interval if this matters.
             cur, peak = tracemalloc.get_traced_memory()
@@ -187,6 +189,8 @@ class ProfileTracer:
             ):
                 return None
             key = (code.co_filename, code.co_name)
+            # _rec() is deliberately not reused here: this is the hot path and
+            # a method call per call-event is measurable. Keep the shapes in sync.
             s = self.stats.get(key)
             if s is None:
                 s = self.stats[key] = {

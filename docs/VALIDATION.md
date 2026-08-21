@@ -267,7 +267,7 @@ post argues against — caught deterministically at a 3% wall-clock delta where 
 sign was wrong.
 
 Two things must change before that story is told. The scope has to narrow honestly to
-pure-Python CPU-bound code, because the C/I-O blind spot is total and the first user to try
+pure-Python CPU-bound code, because the C and I/O blind spot is total and the first user to try
 this on a Django app will find it and say so publicly. And the N+1 claim needs to be rebuilt
 or dropped, because it currently emits confident misdiagnoses on real commits.
 
