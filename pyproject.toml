@@ -14,7 +14,7 @@ dependencies = [
 
 keywords = [
     "profiling", "performance", "regression", "regression-testing",
-    "ci", "benchmark", "tracing", "profiler", "n+1",
+    "ci", "benchmark", "tracing", "profiler", "regression-gate",
 ]
 
 classifiers = [

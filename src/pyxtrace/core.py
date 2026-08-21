@@ -107,10 +107,14 @@ class TraceSession:
             mod: ModuleType = importlib.util.module_from_spec(spec)
             sys.modules["__main__"] = mod
             sys.settrace(tracer)
+            # sys.settrace only covers this thread; settrace() registers the
+            # same hook for every thread the script starts after this point
+            threading.settrace(tracer)
             try:
                 spec.loader.exec_module(mod)  # type: ignore[union-attr]
             finally:
                 sys.settrace(None)
+                threading.settrace(None)  # type: ignore[arg-type]
         finally:
             # embedders keep running after us; leave their sys.path as we found it
             if sys.path and sys.path[0] == script_dir:

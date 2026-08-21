@@ -249,15 +249,28 @@ Bug 1 blocked the entire validation at step one — it means the tool could not 
 multi-file project, which is the whole target audience. 10/10 tests pass; overhead gate
 passes at 42x.
 
-## Open, not fixed (decisions for you)
+## Acted on since this report
 
-- **`--min-ops 100` default misses real regressions.** Measured: 5 works on sqlglot. Needs a
-  defensible default, or scaling relative to the function's own baseline rather than absolute.
-- **No `--root` flag**, so installed packages cannot be traced at all. Bug 2 makes this
-  visible rather than silent, but the case still does not work.
-- **N+1 detection** — rebuild as a two-input-size scaling check, or cut it.
-- **`own_time` in the committed artifact** causes baseline churn.
-- **Threading** — ~6 lines, prototype validated.
+Every item this report left open has now been closed. The findings above are kept
+unedited as the record of what was measured.
+
+- **`--min-ops` default is now 10.** Swept 100/50/25/20/15/10/5/3/1 against the 12 real
+  sqlglot commit pairs. 10 is the largest value that still catches the single-query
+  regression (+19 operations in `_parse_join`) and it holds total findings across all 12
+  pairs to 5. The identical-code control reports nothing at *any* value, including 1: the
+  floor filters insignificance, not noise, because the counts are exact.
+- **`--root DIR` added.** An installed copy of jinja2 goes from 1 traced function to 305.
+- **N+1 detection removed, attribution kept.** The diff still reports the caller that
+  introduced the work and ranks it above the callees that absorbed it, but it now states
+  the measurement ("runs 120x and makes 1 more call to `fetch_customer()` each time")
+  instead of naming a pattern and prescribing a fix. Dropping the caller signal entirely
+  was tried first and was worse: `process_order` stopped being reported at all, leaving
+  only the downstream symptoms.
+- **`own_time` no longer written to the run file.** It stays in the terminal summary. Run
+  files are now byte-identical between runs, so a committed baseline produces no git diff
+  until the code changes.
+- **Threads are traced**, via `threading.settrace` plus a per-thread call stack. Cost:
+  49x on `fib(22)`, up from 45x.
 
 ## Verdict
 

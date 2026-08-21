@@ -17,6 +17,10 @@ from typing import Any, Dict, Iterable, Tuple
 
 FORMAT_VERSION = 1
 
+# How often a function must run before extra per-invocation calls mean anything.
+# Below this it is an ordinary loop in a function that runs once or twice.
+_MIN_REPEAT = 10
+
 
 def _name(filename: str, root: Path) -> str:
     """Stable, machine-independent function-file label."""
@@ -53,10 +57,21 @@ def to_dict(
 
 
 def save(run: Dict[str, Any], path: str | Path) -> Path:
+    """Write the run artifact, without the timing that would churn a baseline.
+
+    ``own_time`` moves every run, so writing it would produce a git diff on
+    every function of a file whose whole purpose is to be committed and
+    compared.  It stays in the in-memory dict for the terminal summary.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    stable = dict(run)
+    stable["functions"] = {
+        name: {k: v for k, v in fn.items() if k != "own_time"}
+        for name, fn in run["functions"].items()
+    }
     # sort_keys so an unchanged run produces a byte-identical file
-    path.write_text(json.dumps(run, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(stable, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
@@ -97,54 +112,12 @@ def _callee_deltas(before: Dict[str, Any], after: Dict[str, Any]) -> list[Dict[s
     return sorted(rows, key=lambda r: r["after"] - r["before"], reverse=True)
 
 
-def _n_plus_one(
-    fn_before: Dict[str, Any],
-    fn_after: Dict[str, Any],
-    callees: list[Dict[str, Any]],
-    *,
-    min_parent_calls: int = 10,
-) -> Dict[str, Any] | None:
-    """
-    Detect per-item fan-out: a function that runs many times and now makes at
-    least one extra call each, where it previously made fewer.
-
-    That is the N+1 shape — work that scales with the number of items instead
-    of being done once for the batch.  Requiring the *parent* to run many times
-    is what separates it from an ordinary loop, where one caller iterates.
-
-    Pure arithmetic over deterministic counts: no model, no confidence score.
-    """
-    calls_before = fn_before.get("calls", 0)
-    calls_after = fn_after.get("calls", 0)
-    if calls_after < min_parent_calls:
-        return None  # an ordinary loop in a function that runs once or twice
-    if calls_after > calls_before * 1.1:
-        # The function is running more often than it used to, so its extra
-        # calls are explained by its own caller. The N+1 was introduced
-        # further up; flagging here would blame the symptom.
-        return None
-
-    for row in callees:
-        grew = row["after"] - row["before"]
-        if grew <= 0 or grew < calls_after:
-            continue  # not at least one *additional* call per invocation
-        return {
-            "callee": row["name"],
-            "parent_calls": calls_after,
-            "total_before": row["before"],
-            "total_after": row["after"],
-            "per_call_after": row["after"] / calls_after,
-            "per_call_before": row["before"] / calls_before if calls_before else 0.0,
-        }
-    return None
-
-
 def diff(
     before: Dict[str, Any],
     after: Dict[str, Any],
     *,
     threshold: float = 10.0,
-    min_ops: int = 100,
+    min_ops: int = 10,
 ) -> list[Dict[str, Any]]:
     """
     Compare two runs on ``lines`` — the deterministic operation count.
@@ -152,6 +125,11 @@ def diff(
     A function is reported when it grew by more than *threshold* percent **and**
     by at least *min_ops* operations, so a 2→3 line change does not raise an
     alarm just because it is +50%.  Results are ranked by absolute growth.
+
+    ``min_ops`` is a significance floor, not a noise floor: counts are exact, so
+    an unchanged run reports nothing at any setting.  10 is the smallest value
+    measured to catch a real regression (sqlglot 105cbb67, +19 operations in
+    ``_parse_join``) without burying it in incidental one-line changes.
     """
     b_fns, a_fns = before["functions"], after["functions"]
     findings = []
@@ -162,15 +140,27 @@ def diff(
         delta = a.get("lines", 0) - b.get("lines", 0)
         pct = _pct(b.get("lines", 0), a.get("lines", 0))
         callees = _callee_deltas(b, a)
-        npo = _n_plus_one(b, a, callees)
 
-        # Report on operation growth, or on a fan-out pattern even when the
-        # function's own line count barely moved — the caller that introduced
-        # an N+1 often does not grow itself, it just delegates the new work.
         grew = delta >= min_ops and (
             pct is None or pct == float("inf") or pct >= threshold
         )
-        if not grew and npo is None:
+        # A function that introduces extra work often does not grow itself, it
+        # just calls something else more often. Without this the diff blames the
+        # callee that got busier instead of the caller that made it happen.
+        #
+        # Deliberately narrow: the function has to run often, must not simply be
+        # running more because its own caller does, and some callee has to gain
+        # at least one extra call for every invocation. Reporting any callee
+        # growth instead cascades up the call chain (measured: 30+ findings per
+        # commit on sqlglot, against 1-2 here).
+        calls_before, calls_after = b.get("calls", 0), a.get("calls", 0)
+        extra_calls = sum(r["after"] - r["before"] for r in callees)
+        delegated = (
+            calls_after >= _MIN_REPEAT
+            and calls_after <= calls_before * 1.1
+            and any(r["after"] - r["before"] >= calls_after for r in callees)
+        )
+        if not (grew or delegated):
             continue
 
         findings.append(
@@ -184,11 +174,10 @@ def diff(
                 "calls_after": a.get("calls", 0),
                 "is_new": name not in b_fns,
                 "callees": callees,
-                "n_plus_one": npo,
+                "extra_calls": extra_calls,
+                "delegated": delegated,
             }
         )
 
-    # N+1 findings first — they name the cause, not just the symptom
-    return sorted(
-        findings, key=lambda f: (f["n_plus_one"] is not None, f["delta"]), reverse=True
-    )
+    # callers that introduced work rank above the callees that absorbed it
+    return sorted(findings, key=lambda f: (f["delegated"], f["delta"]), reverse=True)

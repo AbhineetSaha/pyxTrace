@@ -91,7 +91,7 @@ def diff_cmd(
         10.0, "--threshold", "-t", help="Fail if a function grows more than this percent"
     ),
     min_ops: int = typer.Option(
-        100, "--min-ops", help="Ignore growth smaller than this many operations"
+        10, "--min-ops", help="Ignore growth smaller than this many operations"
     ),
 ) -> None:
     """
