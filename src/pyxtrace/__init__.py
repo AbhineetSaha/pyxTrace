@@ -1,46 +1,43 @@
 """
 pyxtrace
 ========
-Interactive visual tracer for Python system‑calls, byte‑code and memory.
+Catch Python performance regressions with deterministic operation counts.
 
 Quick start
 -----------
 
->>> from pyxtrace import TraceSession
->>> TraceSession().trace("examples/fibonacci.py")
+>>> from pathlib import Path
+>>> from pyxtrace import run_tracer
+>>> run_tracer(Path("examples/orders.py"), out=Path("before.pyxt"))
 
-(The CLI wrapper does the same thing:  `pyxtrace trace examples/fibonacci.py`)
+Then compare two runs::
+
+    pyxtrace diff before.pyxt after.pyxt
 """
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-# --------------------------------------------------------------------------- #
-# Package version                                                             #
-# --------------------------------------------------------------------------- #
 try:
     __version__ = version("pyxtrace")           # installed dist
 except PackageNotFoundError:                    # editable / source checkout
-    __version__ = "1.2.0"
+    __version__ = "2.0.0"
 
-# --------------------------------------------------------------------------- #
-#  ▄▄▄  We must import `core` FIRST so the Event dataclass already exists     #
-# ▀█ █▀ Otherwise bytecode/memory modules that need Event will hit a loop     #
-# --------------------------------------------------------------------------- #
-from .core import TraceSession, Event  # noqa: E402  (import after metadata)
-
-# The following imports *may* depend on core.Event, so we do them afterwards
-from .syscalls import SyscallTracer          # platform‑specific subclass
-from .bytecode import BytecodeTracer
-from .memory import MemoryTracer
+from .core import Event, TraceSession, run_tracer
+from .bytecode import BytecodeTracer, FilteredTracer, ProfileTracer
+from .run import diff, load, save
 from .visual import TraceVisualizer
 
 __all__ = [
     "TraceSession",
-    "SyscallTracer",
+    "run_tracer",
+    "ProfileTracer",
+    "FilteredTracer",
     "BytecodeTracer",
-    "MemoryTracer",
     "TraceVisualizer",
-    "Event",              # useful for type‑checking user extensions
+    "diff",
+    "load",
+    "save",
+    "Event",
     "__version__",
 ]

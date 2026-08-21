@@ -1,17 +1,14 @@
 """
-core.py – orchestrates tracing + optional Streamlit dashboard replay.
+core.py – orchestrates a traced run and writes the .pyxt run artifact.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import multiprocessing as mp
 import os
-import shutil
-import subprocess as sp
 import sys
-import tempfile
+import tracemalloc
 import threading
 import time
 from dataclasses import dataclass
@@ -20,8 +17,9 @@ from queue import SimpleQueue
 from types import ModuleType
 from typing import Optional, TypedDict
 
-from pyxtrace.bytecode import FilteredTracer
-from pyxtrace.visual import serve_dashboard, TraceVisualizer
+from pyxtrace.bytecode import FilteredTracer, ProfileTracer
+from pyxtrace.run import save as save_run, to_dict as run_to_dict
+from pyxtrace.visual import render_run, TraceVisualizer
 
 
 # ---------------- async JSONL writer -------------------------------- #
@@ -55,37 +53,6 @@ class _AsyncLog:
         self._f.close()
 
 
-# ---------------- replay worker ------------------------------------- #
-def _replay_worker(src_jsonl: str, dst_jsonl: str, fps: float) -> None:
-    """
-    Copy *all* rows from src → dst.
-
-    • The first pass is written as fast as possible so the dashboard sees
-      the full history immediately.
-    • Subsequent passes honour the fps delay for a smooth “live” effect.
-    """
-    delay = 1.0 / max(fps, 1e-3)
-
-    while True:
-        # copy all rows from src to dst
-        with open(src_jsonl, "r", encoding="utf-8") as fp_src, open(
-            dst_jsonl, "a", encoding="utf-8"
-        ) as fp_dst:
-            # seek to current EOF of dst to avoid duplicates
-            fp_dst.seek(0, 2)
-            offset = fp_dst.tell()
-            fp_src.seek(offset)
-
-            for raw in fp_src:
-                fp_dst.write(raw)
-                fp_dst.flush()
-                time.sleep(delay)
-
-        # src file is exhausted – sleep briefly, then poll again
-        time.sleep(delay)
-
-
-
 # ---------------- public API types ---------------------------------- #
 class Event(TypedDict, total=False):
     ts: float
@@ -101,23 +68,66 @@ class TraceSession:
     script_path: Path
     log_path: Optional[Path] = None
     mode: str = "full"
-    dash: bool = False
-    fps: float = 20.0
+    capture_returns: bool = False
+    memory: bool = False
+    events: bool = False        # write the raw JSONL event stream instead
+    out: Optional[Path] = None  # .pyxt run file
+
+    # ------------------------------------------------------------------ #
+    def _exec_script(self, tracer) -> None:
+        """Run the target script under *tracer*."""
+        spec = importlib.util.spec_from_file_location("__main__", self.script_path)
+        assert spec is not None
+        mod: ModuleType = importlib.util.module_from_spec(spec)
+        sys.modules["__main__"] = mod
+        sys.settrace(tracer)
+        try:
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        finally:
+            sys.settrace(None)
 
     # ------------------------------------------------------------------ #
     def run(self) -> None:
+        if not self.events:
+            return self._run_profile()
+        return self._run_events()
+
+    # ------------------------------------------------------------------ #
+    def _run_profile(self) -> None:
+        """Default path: accumulate per-function totals, write a .pyxt run."""
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        out = Path(self.out) if self.out else Path(f"pyxtrace-{ts}.pyxt").resolve()
+        root = self.script_path.parent
+
+        print(f"[pyxTrace] ➜ profiling '{self.script_path}' → {out}")
+        tracer = ProfileTracer(root_path=root)
+        try:
+            self._exec_script(tracer)
+        finally:
+            print("[pyxTrace] ✔ finished")
+
+        data = run_to_dict(tracer.stats, root=root, script=self.script_path.name)
+        save_run(data, out)
+        render_run(data, out)
+
+    # ------------------------------------------------------------------ #
+    def _run_events(self) -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")
         self.log_path = self.log_path or Path(f"pyxtrace-{ts}.jsonl").resolve()
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
         os.environ["PYXTRACE_EVENT_LOG"] = str(self.log_path)
 
+        if self.memory:
+            tracemalloc.start()
+
         log = _AsyncLog(self.log_path)
-        tracer = None
         tracer = FilteredTracer(
             log,
             mode=self.mode,
             root_path=self.script_path.parent,   # only user files
+            capture_returns=self.capture_returns,
+            memory=self.memory,
         )
 
         print(
@@ -125,54 +135,31 @@ class TraceSession:
             f"(mode={self.mode}) → {self.log_path}"
         )
 
-        sys.settrace(tracer)
-
-        spec = importlib.util.spec_from_file_location("__main__", self.script_path)
-        assert spec is not None
-        mod: ModuleType = importlib.util.module_from_spec(spec)
-        sys.modules["__main__"] = mod
         try:
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            self._exec_script(tracer)
         finally:
-            sys.settrace(None)
             log.close()
             print("[pyxTrace] ✔ finished")
 
-        # --- dashboard & replay -------------------------------------- #
-        if self.dash:
-            tmp_dir = Path(tempfile.mkdtemp(prefix="pyxtrace-replay-"))
-            stream_path = tmp_dir / self.log_path.name
-            stream_path.touch()
-
-            replay_proc = mp.Process(
-                target=_replay_worker,
-                args=(str(self.log_path), str(stream_path), self.fps),
-                daemon=True,
-            )
-            replay_proc.start()
-
-            dash_proc = mp.Process(
-                target=serve_dashboard,
-                args=(str(stream_path),),
-                daemon=True,
-            )
-            dash_proc.start()
-
-            print("[pyxTrace] Streamlit dashboard: http://127.0.0.1:8050  (CTRL-C to stop)")
-            try:
-                while dash_proc.is_alive():
-                    time.sleep(0.5)
-            except KeyboardInterrupt:
-                pass
-            finally:
-                dash_proc.terminate()
-                replay_proc.terminate()
-                dash_proc.join()
-                replay_proc.join()
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-        else:
-            TraceVisualizer.from_jsonl(self.log_path).render()
+        TraceVisualizer.from_jsonl(self.log_path).render()
 
 
-def run_tracer(script_path: Path, *, mode: str = "full", log_path: Path | None = None):
-    TraceSession(script_path, log_path=log_path, mode=mode).run()
+def run_tracer(
+    script_path: Path,
+    *,
+    mode: str = "full",
+    log_path: Path | None = None,
+    out: Path | None = None,
+):
+    """
+    Profile *script_path* and write a .pyxt run to *out*.
+
+    Passing ``log_path`` selects the raw JSONL event stream instead.
+    """
+    TraceSession(
+        script_path,
+        log_path=log_path,
+        mode=mode,
+        out=out,
+        events=log_path is not None,
+    ).run()
