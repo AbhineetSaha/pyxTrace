@@ -41,6 +41,12 @@ def run_cmd(
     out: Path | None = typer.Option(
         None, "--out", "-o", help="Run file to write (default ./pyxtrace-<ts>.pyxt)"
     ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        help="Directory to profile (default: the script's own directory). "
+        "Point this at an installed or out-of-tree package to trace it.",
+    ),
     events: bool = typer.Option(
         False, "--events", help="Write the raw JSONL event stream instead of a run file"
     ),
@@ -68,6 +74,7 @@ def run_cmd(
         script_path=script,
         log_path=log,
         out=out,
+        root=root,
         mode=mode.value,
         events=events or log is not None,
         capture_returns=capture_returns,

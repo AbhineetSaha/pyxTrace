@@ -134,3 +134,22 @@ def test_warns_when_only_the_entry_script_was_traced(capsys) -> None:
 
     render_run({"script": "app.py", "functions": {"app.py::<module>": {"calls": 1, "lines": 3, "own_time": 0.0}}})
     assert "only the entry script was traced" in capsys.readouterr().out.lower()
+
+
+def test_root_traces_a_library_outside_the_script_directory(tmp_path: Path) -> None:
+    """The default root filters out any package the script does not sit beside."""
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "mylib.py").write_text("def work(n):\n    return sum(range(n))\n")
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    app = app_dir / "main.py"
+    app.write_text(f"import sys\nsys.path.insert(0, {str(lib)!r})\nimport mylib\nmylib.work(50)\n")
+
+    core.run_tracer(app, out=tmp_path / "off.pyxt")
+    core.run_tracer(app, out=tmp_path / "on.pyxt", root=lib)
+
+    off = runfile.load(tmp_path / "off.pyxt")["functions"]
+    on = runfile.load(tmp_path / "on.pyxt")["functions"]
+    assert not any(k.startswith("mylib.py") for k in off)
+    assert on["mylib.py::work"]["calls"] == 1

@@ -72,6 +72,18 @@ class TraceSession:
     memory: bool = False
     events: bool = False        # write the raw JSONL event stream instead
     out: Optional[Path] = None  # .pyxt run file
+    root: Optional[Path] = None  # dir to trace (default: the script's own dir)
+
+    # ------------------------------------------------------------------ #
+    @property
+    def trace_root(self) -> Path:
+        """Directory whose code is profiled.
+
+        Defaults to the script's own directory, which misses a library that
+        lives anywhere else — installed in site-packages, or one level up from
+        a script in benchmarks/. Point --root at the package to trace it.
+        """
+        return Path(self.root).resolve() if self.root else self.script_path.parent
 
     # ------------------------------------------------------------------ #
     def _exec_script(self, tracer) -> None:
@@ -100,7 +112,7 @@ class TraceSession:
         """Default path: accumulate per-function totals, write a .pyxt run."""
         ts = time.strftime("%Y%m%d-%H%M%S")
         out = Path(self.out) if self.out else Path(f"pyxtrace-{ts}.pyxt").resolve()
-        root = self.script_path.parent
+        root = self.trace_root
 
         print(f"[pyxTrace] ➜ profiling '{self.script_path}' → {out}")
         tracer = ProfileTracer(root_path=root)
@@ -128,7 +140,7 @@ class TraceSession:
         tracer = FilteredTracer(
             log,
             mode=self.mode,
-            root_path=self.script_path.parent,   # only user files
+            root_path=self.trace_root,           # only user files
             capture_returns=self.capture_returns,
             memory=self.memory,
         )
@@ -153,6 +165,7 @@ def run_tracer(
     mode: str = "full",
     log_path: Path | None = None,
     out: Path | None = None,
+    root: Path | None = None,
 ):
     """
     Profile *script_path* and write a .pyxt run to *out*.
@@ -164,5 +177,6 @@ def run_tracer(
         log_path=log_path,
         mode=mode,
         out=out,
+        root=root,
         events=log_path is not None,
     ).run()

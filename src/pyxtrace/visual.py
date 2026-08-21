@@ -53,8 +53,9 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
             "[yellow]Warning: only the entry script was traced.[/] pyxTrace "
             "profiles code under the script's own directory, so a library "
             "installed in site-packages or living outside that directory "
-            "recorded nothing. This run is effectively empty — a baseline "
-            "saved from it will never detect a regression."
+            "recorded nothing. This run is effectively empty, and a baseline "
+            "saved from it will never detect a regression. Pass --root "
+            "<package dir> to profile it."
         )
     if path:
         c.print(f"[dim]run saved to {path}[/]")
