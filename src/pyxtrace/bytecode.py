@@ -189,16 +189,7 @@ class ProfileTracer:
             ):
                 return None
             key = (code.co_filename, code.co_name)
-            # _rec() is deliberately not reused here: this is the hot path and
-            # a method call per call-event is measurable. Keep the shapes in sync.
-            s = self.stats.get(key)
-            if s is None:
-                s = self.stats[key] = {
-                    "calls": 0,
-                    "lines": 0,
-                    "own_time": 0.0,
-                    "callees": Counter(),
-                }
+            s = self._rec(key)
             s["calls"] += 1
             if stack:
                 # ponytail: an untraced frame between caller and callee shifts

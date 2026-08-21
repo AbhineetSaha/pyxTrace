@@ -31,6 +31,10 @@ OUT = ROOT / "docs" / "demo.svg"
 def _record(tmp: Path, name: str, n_plus_one: bool) -> Path:
     out = tmp / name
     env = dict(os.environ, PYXTRACE_NPLUSONE="1" if n_plus_one else "0")
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+    # Argument list, no shell. EXAMPLE is a module constant and `out` is built
+    # from a TemporaryDirectory this function created, so nothing here comes
+    # from outside the process.
     subprocess.run(
         [sys.executable, "-m", "pyxtrace", str(EXAMPLE), "-o", str(out)],
         env={**env, "PYTHONPATH": str(ROOT / "src")},
