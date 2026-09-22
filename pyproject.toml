@@ -1,15 +1,14 @@
 [project]
 name            = "pyxtrace"
-version         = "2.0.0"
+version         = "2.1.0"
 description     = "Catch Python performance regressions in CI using deterministic operation counts instead of flaky wall-clock timing."
 readme          = "README.md"
-authors         = [{ name = "Abhineet Saha" }]
+authors         = [{ name = "Abhineet Saha", email = "abhineetsaha.2004@gmail.com" }]
 license         = { file = "LICENSE" }
 requires-python = ">=3.10"
 
 dependencies = [
     "rich>=13.0",
-    "typer>=0.9",
 ]
 
 keywords = [
@@ -41,15 +40,13 @@ Issues        = "https://github.com/AbhineetSaha/pyxTrace/issues"
 
 [project.optional-dependencies]
 dev = [
-    "black",
     "ruff",
     "mypy",
     "pytest>=7",
-    "pre-commit",
 ]
 
 [project.scripts]
-pyxtrace = "pyxtrace.__main__:main"
+pyxtrace = "pyxtrace.cli:main"
 
 # ---------------- build-system & setuptools bits ----------------
 [build-system]
@@ -62,6 +59,3 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where    = ["src"]
 include  = ["pyxtrace*"]
-
-[tool.setuptools.dynamic]
-version = {attr = "pyxtrace.__version__"}

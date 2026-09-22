@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import cProfile
 import importlib.util
-import json
 import statistics
 import sys
 import time
@@ -28,22 +27,9 @@ _spec = importlib.util.spec_from_file_location("_pyx_bytecode", _SRC)
 assert _spec and _spec.loader
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
-FilteredTracer = _mod.FilteredTracer
 ProfileTracer = _mod.ProfileTracer
 
 HERE = Path(__file__).resolve().parent
-
-
-class CountingLog:
-    """Stand-in for core._AsyncLog — serialises like the real writer does."""
-
-    def __init__(self) -> None:
-        self.n = 0
-        self.bytes = 0
-
-    def enqueue(self, obj: dict) -> None:
-        self.n += 1
-        self.bytes += len(json.dumps(obj, default=str)) + 1
 
 
 def fib(n: int) -> int:
@@ -81,14 +67,6 @@ def main() -> int:
     total_calls = sum(s["calls"] for s in prof.stats.values())
     print("default path (ProfileTracer, accumulates in memory)")
     print(f"  {prof_dt * 1e3:8.1f} ms   {prof_ratio:7.1f}x   {total_calls:,} calls tracked, 0 bytes written\n")
-
-    # --- opt-in path: raw JSONL event stream -------------------------- #
-    print("--events path (FilteredTracer, one JSONL record per event)")
-    print(f"  {'mode':6} {'time_ms':>10} {'overhead':>10} {'events':>10} {'log_MB':>9}")
-    for mode in ("demo", "perf", "full"):
-        log = CountingLog()
-        dt = _under(FilteredTracer(log, mode=mode, root_path=HERE), n)
-        print(f"  {mode:6} {dt * 1e3:10.1f} {dt / base:9.1f}x {log.n:10,} {log.bytes / 1e6:9.2f}")
 
     # --- reference ----------------------------------------------------- #
     pr = cProfile.Profile()

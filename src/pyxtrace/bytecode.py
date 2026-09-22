@@ -1,54 +1,30 @@
 """
-bytecode.py – FilteredTracer
-• full  – trace everything
-• perf  – skip std-lib/built-ins
-• demo  – call/return only
-In all modes we also filter by root_path so only events from the user’s
-script (or its siblings) are logged.
+bytecode.py – ProfileTracer, the sys.settrace hook behind the regression gate.
 
-The root-path decision is cached per ``co_filename``: resolving the path on
-every event costs a stat(2) syscall and dominated the tracer's runtime
-(~160x slower than the cached form).
+Only frames whose file lives under ``root_path`` are counted, and that decision
+is cached per ``co_filename``: resolving the path on every event costs a
+stat(2) syscall and dominated the tracer's runtime (~160x slower than the
+cached form).
 """
 
 from __future__ import annotations
 
 import threading
 import time
-import tracemalloc
 from collections import Counter
 from pathlib import Path
 from types import FrameType
-from typing import Any, Dict, Set, Tuple
-
-__all__ = ["FilteredTracer", "ProfileTracer"]
+from typing import Any, Dict, Tuple
 
 Key = Tuple[str, str]  # (file, function)
-
-_SKIP_MODULES: Set[str] = {
-    "builtins",
-    "sys",
-    "types",
-    "importlib",
-    "collections",
-    "abc",
-    "functools",
-    "inspect",
-    "posixpath",
-    "genericpath",
-    "io",
-    "logging",
-}
 
 
 def in_root(filename: str, root: Path, cache: Dict[str, bool]) -> bool:
     """
     Is *filename* inside *root*?  The answer is memoised in *cache*.
 
-    Resolving the path on every trace event costs a stat(2) syscall and was
-    ~160x more expensive than this lookup.  Code objects reuse the same
-    ``co_filename`` string, so the cache hits on all but the first event
-    per source file.
+    Code objects reuse the same ``co_filename`` string, so the cache hits on
+    all but the first event per source file.
     """
     keep = cache.get(filename)
     if keep is None:
@@ -57,84 +33,11 @@ def in_root(filename: str, root: Path, cache: Dict[str, bool]) -> bool:
             keep = False
         else:
             try:
-                fpath = Path(filename).resolve()
+                keep = Path(filename).resolve().is_relative_to(root)
             except (OSError, RuntimeError):  # built-in / unresolvable frames
                 keep = False
-            else:
-                keep = fpath == root or root in fpath.parents
         cache[filename] = keep
     return keep
-
-
-class FilteredTracer:
-    """Raw event-stream tracer — writes one JSONL record per trace event."""
-
-    def __init__(
-        self,
-        log,
-        mode: str = "full",
-        *,
-        root_path: str | Path | None = None,  # keep only this dir/file
-        capture_returns: bool = False,        # repr() every return value
-        memory: bool = False,                 # inline tracemalloc snapshots
-    ) -> None:
-        self._log = log
-        self._mode = mode
-        self._root = None if root_path is None else Path(root_path).resolve()
-        self._capture_returns = capture_returns
-        self._memory = memory
-        self._keep: Dict[str, bool] = {}
-
-    # ------------------------------------------------------------------ #
-    def _in_root(self, filename: str) -> bool:
-        return in_root(filename, self._root, self._keep)  # type: ignore[arg-type]
-
-    # ------------------------------------------------------------------ #
-    def __call__(self, frame: FrameType, event: str, arg) -> "FilteredTracer | None":  # noqa: D401
-        # 1) perf/demo skip list
-        if self._mode in ("perf", "demo"):
-            mod = frame.f_globals.get("__name__", "")
-            if mod.split(".", 1)[0] in _SKIP_MODULES:
-                return None
-
-        # 2) root-path filter
-        if self._root is not None and not self._in_root(frame.f_code.co_filename):
-            return None
-
-        # 3) demo mode – keep only call/return
-        if self._mode == "demo" and event not in ("call", "return"):
-            return self
-
-        ts_now = time.perf_counter()
-        rec: Dict[str, Any] = {
-            "ts": ts_now,
-            "kind": "BytecodeEvent",
-            "event": event,
-            "func": frame.f_code.co_name,
-            "file": frame.f_code.co_filename,
-            "line": frame.f_lineno,
-            "module": frame.f_globals.get("__name__", ""),
-        }
-        if event == "return" and self._capture_returns:
-            rec["return_value"] = repr(arg)
-
-        # inline heap snapshot (opt-in: costs ~8x on the hot path)
-        # is_tracing(): FilteredTracer is public, and a caller who builds one
-        # directly may not have started tracemalloc. Skip rather than raise.
-        if self._memory and tracemalloc.is_tracing():
-            # ponytail: one snapshot per event is wasteful — the value moves far
-            # slower than the event rate. Sample on an interval if this matters.
-            cur, peak = tracemalloc.get_traced_memory()
-            self._log.enqueue(
-                {
-                    "kind": "MemoryEvent",
-                    "ts": ts_now,
-                    "payload": {"current_kb": cur // 1024, "peak_kb": peak // 1024},
-                }
-            )
-
-        self._log.enqueue(rec)
-        return self  # keep tracing nested calls
 
 
 class ProfileTracer:
@@ -229,6 +132,4 @@ class ProfileTracer:
 
         return self
 
-
-BytecodeTracer = FilteredTracer
 
