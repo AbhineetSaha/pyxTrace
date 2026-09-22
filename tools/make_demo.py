@@ -52,7 +52,7 @@ def main() -> int:
         findings = diff(load(before), load(after))
 
     console = Console(record=True, width=88)
-    console.print("[bold green]$[/] pyxtrace diff before.pyxt after.pyxt")
+    console.print("[bold green]$[/] pyxtrace diff main HEAD")
     render_diff(findings, threshold=10.0, console=console)
     console.print("\n[dim]exit code 1 — the pull request fails[/]")
 
