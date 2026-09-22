@@ -1,0 +1,58 @@
+# voila recipe for the README demo video. Regenerate the page first, then record:
+#
+#   python tools/make_demo.py
+#   python -m http.server 8765 --directory docs/demo &
+#   npx -y voila-recorder record http://localhost:8765/ --steps tools/demo.steps.yaml
+#
+- action: slide
+  title: PyxTrace
+  subtitle: Performance regressions, caught deterministically
+  accent: "#7dd3a0"
+  narration: PyxTrace catches Python performance regressions in CI by counting operations, not time.
+
+- action: goto
+  url: http://localhost:8765/
+  caption: One command records a run
+  narration: Point it at a script. It records how many calls and lines each function executed.
+
+- action: zoom
+  selector: "#run .term"
+  narration: The counts are exact, so unchanged code always produces the same file, keyed by commit.
+
+- action: zoom
+  level: 1
+
+- action: scroll_to
+  selector: "#change"
+  caption: Commit a change, record again
+  narration: Now a small change. Look up each order's customer as we go. Record the new commit.
+
+- action: zoom
+  selector: "#change .term"
+  narration: Fetch customer appears, and execute runs a hundred and twenty one times instead of six.
+
+- action: zoom
+  level: 1
+
+- action: scroll_to
+  selector: "#diff"
+  caption: pyxtrace diff main HEAD
+  narration: Diff the two commits by name. No before and after files to manage.
+
+- action: zoom
+  selector: "#diff .term"
+  narration: Process order now makes one extra call per order, and the diff says exactly which one.
+
+- action: wait
+  ms: 500
+  caption: Exit code 1 fails the pull request
+  narration: It exits one, so the pull request fails. No timing, no flakiness, no threshold tuning.
+
+- action: zoom
+  level: 1
+
+- action: slide
+  title: pip install pyxtrace
+  subtitle: github.com/AbhineetSaha/pyxTrace
+  accent: "#7dd3a0"
+  narration: pip install pyxtrace. One dependency, Python three point ten and up.

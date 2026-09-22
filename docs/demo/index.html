@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>PyxTrace demo</title>
+<style>
+  body { margin: 0; background: #0f1117; color: #e6e6e6;
+         font-family: -apple-system, system-ui, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 56px 24px 120px; }
+  h1 { font-weight: 500; font-size: 30px; margin: 0 0 6px; }
+  .lead { color: #9aa3b2; margin: 0 0 48px; font-size: 17px; }
+  section { margin: 0 0 64px; }
+  h2 { font-size: 15px; font-weight: 500; color: #9aa3b2; margin: 0 0 12px;
+        text-transform: uppercase; letter-spacing: .06em; }
+  .term { background: #161a23; border: 1px solid #262b38; border-radius: 10px;
+           padding: 18px 22px; overflow-x: auto; }
+  .term pre { margin: 0; font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+               white-space: pre; }
+</style></head><body><main>
+<h1>PyxTrace</h1>
+<p class="lead">Catch Python performance regressions in CI with deterministic operation counts.</p>
+<section id="run"><h2>1 · Record a run</h2><div class="term"><pre><span style="color: #98e024; text-decoration-color: #98e024; font-weight: bold">$</span> pyxtrace examples/orders.py
+<span style="color: #727272; text-decoration-color: #727272; font-weight: bold">[</span><span style="color: #727272; text-decoration-color: #727272">pyxTrace</span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">]</span><span style="color: #727272; text-decoration-color: #727272"> ➜ profiling </span><span style="color: #527618; text-decoration-color: #527618">&#x27;examples/orders.py&#x27;</span><span style="color: #727272; text-decoration-color: #727272"> → .pyxtrace/3f2a9c1.pyxt</span>
+<span style="color: #9d65ff; text-decoration-color: #9d65ff; font-weight: bold">                 pyxTrace – orders.py                  </span>
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┓
+┃<span style="font-weight: bold"> function                   </span>┃<span style="font-weight: bold"> calls </span>┃<span style="font-weight: bold"> lines </span>┃<span style="font-weight: bold"> own ms </span>┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━┩
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::serialize       </span>│<span style="color: #98e024; text-decoration-color: #98e024">   120 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   480 </span>│    0.2 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::process_order   </span>│<span style="color: #98e024; text-decoration-color: #98e024">   120 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   360 </span>│    0.2 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::handle_request  </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   245 </span>│    0.1 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::fetch_orders    </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   122 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::fetch_customers </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">    22 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::&lt;module&gt;        </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">    13 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::main            </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">     8 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::execute         </span>│<span style="color: #98e024; text-decoration-color: #98e024">     2 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">     6 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::Cursor          </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">     4 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::__init__        </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">     1 </span>│    0.0 │
+└────────────────────────────┴───────┴───────┴────────┘
+<span style="color: #326e7b; text-decoration-color: #326e7b; font-weight: bold">10</span><span style="color: #727272; text-decoration-color: #727272"> functions · sorted by lines executed </span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">(</span><span style="color: #727272; text-decoration-color: #727272">deterministic</span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">)</span><span style="color: #727272; text-decoration-color: #727272"> · own ms is timing, and varies run</span>
+<span style="color: #727272; text-decoration-color: #727272">to run</span>
+<span style="color: #fd971f; text-decoration-color: #fd971f">Note: only the entry script was traced.</span> If the code you care about lives elsewhere — in 
+site-packages or another directory — pass --root <span style="font-weight: bold">&lt;</span><span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">dir</span><span style="font-weight: bold">&gt;</span>, or a baseline saved from this run 
+will never see it.
+</pre></div></section>
+<section id="change"><h2>2 · Make a change, record again</h2><div class="term"><pre><span style="color: #98e024; text-decoration-color: #98e024; font-weight: bold">$</span> git commit -am <span style="color: #98e024; text-decoration-color: #98e024">&quot;look up each order&#x27;s customer as we go&quot;</span>
+<span style="color: #727272; text-decoration-color: #727272; font-weight: bold">[</span><span style="color: #727272; text-decoration-color: #727272">main 8b41e7d</span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">]</span><span style="color: #727272; text-decoration-color: #727272"> look up each order&#x27;s customer as we go</span>
+
+<span style="color: #98e024; text-decoration-color: #98e024; font-weight: bold">$</span> pyxtrace examples/orders.py
+<span style="color: #727272; text-decoration-color: #727272; font-weight: bold">[</span><span style="color: #727272; text-decoration-color: #727272">pyxTrace</span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">]</span><span style="color: #727272; text-decoration-color: #727272"> ➜ profiling </span><span style="color: #527618; text-decoration-color: #527618">&#x27;examples/orders.py&#x27;</span><span style="color: #727272; text-decoration-color: #727272"> → .pyxtrace/8b41e7d.pyxt</span>
+<span style="color: #9d65ff; text-decoration-color: #9d65ff; font-weight: bold">                 pyxTrace – orders.py                 </span>
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┓
+┃<span style="font-weight: bold"> function                  </span>┃<span style="font-weight: bold"> calls </span>┃<span style="font-weight: bold"> lines </span>┃<span style="font-weight: bold"> own ms </span>┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━┩
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::serialize      </span>│<span style="color: #98e024; text-decoration-color: #98e024">   120 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   480 </span>│    0.1 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::execute        </span>│<span style="color: #98e024; text-decoration-color: #98e024">   121 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   363 </span>│    0.1 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::process_order  </span>│<span style="color: #98e024; text-decoration-color: #98e024">   120 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   360 </span>│    0.2 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::fetch_customer </span>│<span style="color: #98e024; text-decoration-color: #98e024">   120 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   240 </span>│    0.2 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::handle_request </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   124 </span>│    0.1 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::fetch_orders   </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">   122 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::&lt;module&gt;       </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">    13 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::main           </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">     8 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::Cursor         </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">     4 </span>│    0.0 │
+│<span style="color: #58d1eb; text-decoration-color: #58d1eb"> orders.py::__init__       </span>│<span style="color: #98e024; text-decoration-color: #98e024">     1 </span>│<span style="color: #f4005f; text-decoration-color: #f4005f">     1 </span>│    0.0 │
+└───────────────────────────┴───────┴───────┴────────┘
+<span style="color: #326e7b; text-decoration-color: #326e7b; font-weight: bold">10</span><span style="color: #727272; text-decoration-color: #727272"> functions · sorted by lines executed </span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">(</span><span style="color: #727272; text-decoration-color: #727272">deterministic</span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">)</span><span style="color: #727272; text-decoration-color: #727272"> · own ms is timing, and varies run</span>
+<span style="color: #727272; text-decoration-color: #727272">to run</span>
+<span style="color: #fd971f; text-decoration-color: #fd971f">Note: only the entry script was traced.</span> If the code you care about lives elsewhere — in 
+site-packages or another directory — pass --root <span style="font-weight: bold">&lt;</span><span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">dir</span><span style="font-weight: bold">&gt;</span>, or a baseline saved from this run 
+will never see it.
+</pre></div></section>
+<section id="diff"><h2>3 · Compare the two commits</h2><div class="term"><pre><span style="color: #98e024; text-decoration-color: #98e024; font-weight: bold">$</span> pyxtrace diff main HEAD
+
+<span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">⚠</span>  <span style="font-weight: bold">orders.py::process_order</span>  <span style="color: #f4005f; text-decoration-color: #f4005f">+</span><span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">120</span><span style="color: #f4005f; text-decoration-color: #f4005f"> calls to other functions</span>  <span style="color: #727272; text-decoration-color: #727272; font-weight: bold">(</span><span style="color: #727272; text-decoration-color: #727272">same code, more work</span><span style="color: #727272; text-decoration-color: #727272; font-weight: bold">)</span>
+   <span style="color: #fd971f; text-decoration-color: #fd971f; font-weight: bold">process_order()</span><span style="color: #fd971f; text-decoration-color: #fd971f"> runs 12</span><span style="color: #fd971f; text-decoration-color: #fd971f; font-weight: bold">0x</span> and makes <span style="color: #58d1eb; text-decoration-color: #58d1eb; font-weight: bold">1</span><span style="font-weight: bold"> more </span><span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">call</span><span style="font-weight: bold">(s) to </span><span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">fetch_customer</span><span style="font-weight: bold">()</span> each time
+   <span style="color: #727272; text-decoration-color: #727272">Attributed to:</span>
+     orders.py::fetch_customer   <span style="color: #58d1eb; text-decoration-color: #58d1eb; font-weight: bold">0</span> → <span style="color: #58d1eb; text-decoration-color: #58d1eb; font-weight: bold">120</span> calls   <span style="color: #727272; text-decoration-color: #727272">new</span>
+
+<span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">⚠</span>  <span style="font-weight: bold">orders.py::execute</span>  <span style="color: #f4005f; text-decoration-color: #f4005f">+</span><span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">5</span><span style="color: #f4005f; text-decoration-color: #f4005f">,</span><span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">950</span><span style="color: #f4005f; text-decoration-color: #f4005f">% operations</span>  <span style="font-weight: bold">(</span><span style="color: #326e7b; text-decoration-color: #326e7b; font-weight: bold">6</span><span style="color: #727272; text-decoration-color: #727272"> → </span><span style="color: #326e7b; text-decoration-color: #326e7b; font-weight: bold">363</span><span style="font-weight: bold">)</span>
+
+<span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">⚠</span>  <span style="font-weight: bold">orders.py::fetch_customer</span>  <span style="color: #f4005f; text-decoration-color: #f4005f">new operations</span>  <span style="font-weight: bold">(</span><span style="color: #326e7b; text-decoration-color: #326e7b; font-weight: bold">0</span><span style="color: #727272; text-decoration-color: #727272"> → </span><span style="color: #326e7b; text-decoration-color: #326e7b; font-weight: bold">240</span><span style="font-weight: bold">)</span>
+   <span style="color: #727272; text-decoration-color: #727272">Attributed to:</span>
+     orders.py::execute   <span style="color: #58d1eb; text-decoration-color: #58d1eb; font-weight: bold">0</span> → <span style="color: #58d1eb; text-decoration-color: #58d1eb; font-weight: bold">120</span> calls   <span style="color: #727272; text-decoration-color: #727272">new</span>
+
+<span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">✗ FAIL</span> — <span style="color: #58d1eb; text-decoration-color: #58d1eb; font-weight: bold">3</span> <span style="color: #f4005f; text-decoration-color: #f4005f; font-weight: bold">function</span><span style="font-weight: bold">(</span>s<span style="font-weight: bold">)</span> regressed
+
+<span style="color: #727272; text-decoration-color: #727272">exit code </span><span style="color: #326e7b; text-decoration-color: #326e7b; font-weight: bold">1</span><span style="color: #727272; text-decoration-color: #727272"> — the pull request fails</span>
+</pre></div></section>
+</main></body></html>

@@ -10,7 +10,9 @@
   <a href="https://github.com/AbhineetSaha/pyxTrace/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/AbhineetSaha/pyxTrace/ci.yml?style=flat-square&label=CI"></a>
 </p>
 
-<img src="docs/demo.svg" alt="pyxtrace diff attributing a regression to the call that caused it" width="820">
+<img src="docs/demo.gif" alt="Recording a run, committing a change, and pyxtrace diff attributing the regression to the call that caused it" width="820">
+
+<p><a href="docs/demo.mp4">Narrated version (MP4, 1 min)</a></p>
 
 </div>
 
