@@ -24,7 +24,7 @@ Current commands:
 ```bash
 pyxtrace run app.py -o before.pyxt     # profile → run file (`run` is optional)
 pyxtrace diff before.pyxt after.pyxt   # exit 1 on regression, detects N+1
-python benchmarks/overhead.py          # overhead + determinism gate, fails past 50x
+python benchmarks/overhead.py          # overhead + determinism gate, fails past 150x
 ```
 
 State: **43x overhead** (was 25,700x), 8 tests passing, 2 dependencies, everything

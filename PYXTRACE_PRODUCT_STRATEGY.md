@@ -12,7 +12,7 @@
 
 | # | Priority | Status | Result |
 |---|---|---|---|
-| 1 | Cache the path filter | ✅ | **25,700x → 44x** overhead; gate in `benchmarks/overhead.py` fails past 50x |
+| 1 | Cache the path filter | ✅ | **25,700x → 44x** overhead; gate in `benchmarks/overhead.py` fails past 150x |
 | 2 | Per-function counts in memory | ✅ | `ProfileTracer` + `.pyxt` run files; 38 MB log → 0 bytes written during the run |
 | 3 | `pyxtrace diff` | ✅ | Ranks regressions, attributes to callees, detects N+1, exits 1 |
 | 4 | Delete dead code, slim deps | ✅ | `syscalls/`, `memory.py`, `kernelspy.py`, `replay.py`, the Streamlit dashboard removed; 4 deps → 2; `--capture-returns` now opt-in |
