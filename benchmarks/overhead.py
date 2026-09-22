@@ -19,8 +19,9 @@ from pathlib import Path
 
 # x slower than untraced; see PYXTRACE_PRODUCT_STRATEGY.md §18. Sized to catch a
 # structural regression (the cached path filter going away costs ~2,287x), not
-# drift: shared CI runners measure 40-56x for the same code.
-MAX_OVERHEAD = 75
+# drift: shared CI runners measured 35x-76x for the same commit, because this is
+# a ratio of two sub-millisecond timings on shared hardware. 2x the worst seen.
+MAX_OVERHEAD = 150
 
 _SRC = Path(__file__).resolve().parent.parent / "src" / "pyxtrace" / "bytecode.py"
 _spec = importlib.util.spec_from_file_location("_pyx_bytecode", _SRC)
