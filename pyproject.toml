@@ -3,7 +3,7 @@ name            = "pyxtrace"
 version         = "2.1.0"
 description     = "Catch Python performance regressions in CI using deterministic operation counts instead of flaky wall-clock timing."
 readme          = "README.md"
-authors         = [{ name = "Abhineet Saha" }]
+authors         = [{ name = "Abhineet Saha", email = "abhineetsaha.2004@gmail.com" }]
 license         = { file = "LICENSE" }
 requires-python = ">=3.10"
 
