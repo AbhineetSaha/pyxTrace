@@ -203,7 +203,7 @@ pytest -q                        # tests
 python benchmarks/overhead.py    # overhead + determinism gate
 ```
 
-The overhead gate fails past 50x. If a change pushes it over, that is the change
+The overhead gate fails past 150x. If a change pushes it over, that is the change
 to reconsider — this tool is only useful if people can afford to run it.
 
 ## License
