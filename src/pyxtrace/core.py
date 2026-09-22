@@ -63,8 +63,9 @@ class TraceSession:
     def run(self) -> None:
         """Accumulate per-function totals and write a .pyxt run."""
         sha = commit_sha()
-        # keyed by commit, so `diff main HEAD` works; -o overrides
-        out = Path(self.out) if self.out else RUN_DIR / f"{sha or 'untracked'}.pyxt"
+        # keyed by commit, so `diff main HEAD` works; -o overrides. Resolved now:
+        # the script may chdir, and the file is written after it finishes.
+        out = Path(self.out) if self.out else RUN_DIR.resolve() / f"{sha or 'untracked'}.pyxt"
         root = self.trace_root
 
         print(f"[pyxTrace] ➜ profiling '{self.script_path}' → {out}")
