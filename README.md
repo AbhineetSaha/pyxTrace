@@ -46,17 +46,17 @@ non-deterministic by construction.
 pip install pyxtrace
 ```
 
-Two dependencies (`rich`, `typer`). Python 3.10+.
+One dependency (`rich`). Python 3.10+.
 
 ## Use
 
-Record a baseline, make a change, compare:
+Record a run per commit, then compare commits:
 
 ```bash
-pyxtrace examples/orders.py -o before.pyxt
-# ... your change ...
-pyxtrace examples/orders.py -o after.pyxt
-pyxtrace diff before.pyxt after.pyxt
+pyxtrace examples/orders.py            # → .pyxtrace/<commit sha>.pyxt
+# ... commit your change ...
+pyxtrace examples/orders.py
+pyxtrace diff HEAD~1 HEAD              # any git ref, or a .pyxt path
 ```
 
 `diff` exits **1** when something regressed, so it drops straight into CI.
@@ -111,28 +111,34 @@ it is shown for orientation and is never what `diff` gates on.
 
 ## In CI
 
+Run files are keyed by commit sha, so a PR gate records the base commit and
+the head and diffs them by name:
+
 ```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }                  # the base commit has to be present
 - run: pip install pyxtrace
-- run: pyxtrace benchmarks/workload.py -o current.pyxt
-- run: pyxtrace diff baseline.pyxt current.pyxt --threshold 10
+- run: pyxtrace benchmarks/workload.py      # HEAD → .pyxtrace/<sha>.pyxt
+- run: |
+    git checkout -q ${{ github.event.pull_request.base.sha }}
+    pyxtrace benchmarks/workload.py         # base → .pyxtrace/<sha>.pyxt
+    git checkout -q -
+- run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD --threshold 10
 ```
 
-Commit `baseline.pyxt` to the repo and regenerate it when a change is
-intentional. Because the file is byte-stable, the diff in code review shows
-exactly which functions got more expensive.
+Because the counts are exact, the base run can be recorded once and cached
+(`actions/cache` on `.pyxtrace/`) instead of re-run per PR; the same commit
+always produces the same bytes.
 
 ## Options
 
 | Command | What it does |
 |---|---|
-| `pyxtrace run SCRIPT -o out.pyxt` | Profile and write a run file (`run` is optional) |
-| `pyxtrace diff A.pyxt B.pyxt` | Compare two runs; exit 1 on regression |
+| `pyxtrace run SCRIPT` | Profile → `.pyxtrace/<commit sha>.pyxt` (`run` is optional; `-o` overrides) |
+| `pyxtrace diff BASE HEAD` | Compare two commits (or `.pyxt` paths); exit 1 on regression |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
 | `--root DIR` | Profile this directory instead of the script's own, for an installed or out-of-tree package |
-| `--events` | Write the raw JSONL event stream instead of a run file |
-| `--capture-returns` | Record return values. **Off by default — these can contain secrets** |
-| `--memory` | Sample heap usage via `tracemalloc` (slower) |
 
 ## Overhead
 
@@ -143,7 +149,6 @@ Measured on `fib(22)`, a deliberately call-heavy worst case
 |---|---|---|
 | **PyxTrace (default profiling path)** | **~49x** | **~9x** |
 | `cProfile` (stdlib, for reference) | ~8x | ~3.4x |
-| `--events` JSONL stream | ~400x | not measured |
 
 `fib(22)` is a deliberate worst case: it does almost nothing between calls, so
 the per-event cost has nothing to amortise against. The real-code column is

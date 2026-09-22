@@ -1,119 +1,72 @@
 """
 pyxTrace command-line interface
 
-    pyxtrace run app.py -o before.pyxt     # profile → .pyxt run file
-    pyxtrace app.py -o before.pyxt         # same thing, `run` is implied
-    pyxtrace diff before.pyxt after.pyxt   # regression gate, exits 1 on failure
-    pyxtrace run app.py --events           # raw JSONL event stream instead
+    pyxtrace run app.py                    # profile → .pyxtrace/<commit sha>.pyxt
+    pyxtrace app.py                        # same thing, `run` is implied
+    pyxtrace diff main HEAD                # regression gate, exits 1 on failure
+    pyxtrace diff a.pyxt b.pyxt            # explicit run files work too
     pyxtrace run app.py -- --epochs 10     # args after `--` go to the script
 """
 from __future__ import annotations
 
-import enum
+import argparse
 import sys
 from pathlib import Path
 
-import typer
-
 from pyxtrace import core
-
-app = typer.Typer(
-    add_completion=False,
-    help="pyxTrace – catch Python performance regressions with deterministic counts",
-    no_args_is_help=True,
-)
+from pyxtrace.run import diff, load, path_for
+from pyxtrace.visual import render_diff
 
 
-class TraceMode(str, enum.Enum):
-    full = "full"      # trace everything
-    perf = "perf"      # skip std-lib / built-ins
-    demo = "demo"      # call + return events only
-
-
-# -------------------------------------------------------------------- #
-@app.command(
-    "run",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-)
-def run_cmd(
-    ctx: typer.Context,
-    script: Path = typer.Argument(..., exists=True, readable=True, resolve_path=True),
-    out: Path | None = typer.Option(
-        None, "--out", "-o", help="Run file to write (default ./pyxtrace-<ts>.pyxt)"
-    ),
-    root: Path | None = typer.Option(
-        None,
-        "--root",
-        help="Directory to profile (default: the script's own directory). "
-        "Point this at an installed or out-of-tree package to trace it.",
-    ),
-    events: bool = typer.Option(
-        False, "--events", help="Write the raw JSONL event stream instead of a run file"
-    ),
-    mode: TraceMode = typer.Option(
-        TraceMode.full, "--mode", "-m", help="Event-stream depth: full | perf | demo"
-    ),
-    log: Path | None = typer.Option(
-        None, "--log", help="JSONL output path (implies --events)"
-    ),
-    capture_returns: bool = typer.Option(
-        False,
-        "--capture-returns",
-        help="Record every return value. These may contain secrets — off by default",
-    ),
-    memory: bool = typer.Option(
-        False, "--memory", help="Sample heap usage via tracemalloc (slower)"
-    ),
-) -> None:
-    """Profile SCRIPT and write a .pyxt run file."""
-    # forward anything after `--` to the traced program
-    idx = sys.argv.index("--") + 1 if "--" in sys.argv else len(sys.argv)
-    sys.argv = [str(script)] + sys.argv[idx:]
-
-    core.TraceSession(
-        script_path=script,
-        log_path=log,
-        out=out,
-        root=root,
-        mode=mode.value,
-        events=events or log is not None,
-        capture_returns=capture_returns,
-        memory=memory,
-    ).run()
-
-
-# -------------------------------------------------------------------- #
-@app.command("diff")
-def diff_cmd(
-    before: Path = typer.Argument(..., exists=True, readable=True, resolve_path=True),
-    after: Path = typer.Argument(..., exists=True, readable=True, resolve_path=True),
-    threshold: float = typer.Option(
-        10.0, "--threshold", "-t", help="Fail if a function grows more than this percent"
-    ),
-    min_ops: int = typer.Option(
-        10, "--min-ops", help="Ignore growth smaller than this many operations"
-    ),
-) -> None:
-    """
-    Compare two .pyxt runs and fail (exit 1) on a performance regression.
-
-    Compares deterministic operation counts, not wall-clock time, so the same
-    code always produces the same verdict.
-    """
-    from pyxtrace.run import diff as run_diff, load as load_run
-    from pyxtrace.visual import render_diff
-
-    findings = run_diff(
-        load_run(before), load_run(after), threshold=threshold, min_ops=min_ops
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="pyxtrace",
+        description="Catch Python performance regressions with deterministic counts",
     )
-    render_diff(findings, threshold=threshold)
-    raise typer.Exit(1 if findings else 0)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    run = sub.add_parser("run", help="profile SCRIPT and write a .pyxt run file")
+    run.add_argument("script", type=Path)
+    run.add_argument("-o", "--out", type=Path,
+                     help="run file to write (default .pyxtrace/<commit sha>.pyxt)")
+    run.add_argument("--root", type=Path,
+                     help="directory to profile (default: the script's own directory); "
+                          "point this at an installed or out-of-tree package to trace it")
+
+    d = sub.add_parser("diff", help="compare two runs and exit 1 on a performance regression")
+    d.add_argument("before", help="commit (main, HEAD, a sha) or .pyxt path")
+    d.add_argument("after", help="commit (main, HEAD, a sha) or .pyxt path")
+    d.add_argument("-t", "--threshold", type=float, default=10.0,
+                   help="fail if a function grows more than this percent (default 10)")
+    d.add_argument("--min-ops", type=int, default=10,
+                   help="ignore growth smaller than this many operations (default 10)")
+    return p
 
 
-# -------------------------------------------------------------------- #
-def main() -> None:  # noqa: D401 – imperative ("Run …")
-    app()
+def main(argv: list[str] | None = None) -> None:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    p = _parser()
+    # `pyxtrace app.py …` → `pyxtrace run app.py …`
+    if argv and argv[0] not in ("run", "diff") and not argv[0].startswith("-"):
+        argv.insert(0, "run")
+    # anything after `--` belongs to the traced script
+    script_args: list[str] = []
+    if "--" in argv:
+        i = argv.index("--")
+        argv, script_args = argv[:i], argv[i + 1:]
+    a = p.parse_args(argv)
 
+    if a.cmd == "run":
+        if not a.script.is_file():
+            p.error(f"{a.script}: no such script")
+        sys.argv = [str(a.script)] + script_args
+        core.TraceSession(script_path=a.script.resolve(), out=a.out, root=a.root).run()
+        return
 
-if __name__ == "__main__":  # pragma: no cover
-    main()
+    try:
+        before, after = path_for(a.before), path_for(a.after)
+    except FileNotFoundError as e:
+        p.error(str(e))
+    findings = diff(load(before), load(after), threshold=a.threshold, min_ops=a.min_ops)
+    render_diff(findings, threshold=a.threshold)
+    sys.exit(1 if findings else 0)

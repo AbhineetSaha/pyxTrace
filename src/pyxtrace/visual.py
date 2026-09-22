@@ -4,9 +4,7 @@ visual.py – Rich terminal output: run summary and regression report.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import List
 
 from rich.console import Console
 from rich.table import Table
@@ -109,35 +107,3 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
     c.print(f"\n[bold red]✗ FAIL[/] — {len(findings)} function(s) regressed")
 
-
-# ───────────────────────────── CLI summary ───────────────────────────
-class TraceVisualizer:
-    """Summary of a raw JSONL event stream (the --events path)."""
-
-    def __init__(self, path: str | Path, *, live: bool = False):
-        self.path = Path(path)
-        self.live = live
-        self.events: List[dict] = []
-        if not live:
-            with self.path.open(encoding="utf-8") as fp:
-                for raw in fp:
-                    try:
-                        self.events.append(json.loads(raw))
-                    except json.JSONDecodeError:
-                        continue
-
-    @classmethod
-    def from_jsonl(cls, path: str | Path) -> "TraceVisualizer":
-        return cls(path, live=False)
-
-    def render(self) -> None:
-        c = Console()
-        c.rule("[bold blue]pyxTrace summary")
-        bc = sum(1 for e in self.events if e.get("kind") == "BytecodeEvent")
-        mc = sum(1 for e in self.events if e.get("kind") == "MemoryEvent")
-        c.print(f"[cyan]events     [/]: {bc}")
-        c.print(f"[magenta]mem samples[/]: {mc}")
-        c.rule()
-
-
-__all__ = ["TraceVisualizer", "render_run", "render_diff"]

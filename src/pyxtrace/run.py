@@ -12,10 +12,15 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
 
 FORMAT_VERSION = 1
+
+# Where `pyxtrace run` files a run when no -o is given: one file per commit, so
+# CI can compare "the base of this PR" against "HEAD" by name.
+RUN_DIR = Path(".pyxtrace")
 
 # How often a function must run before extra per-invocation calls mean anything.
 # Below this it is an ordinary loop in a function that runs once or twice.
@@ -30,11 +35,40 @@ def _name(filename: str, root: Path) -> str:
         return Path(filename).name
 
 
+def commit_sha(rev: str = "HEAD") -> str | None:
+    """Full sha for *rev*; None outside a git repo, or when *rev* is not a commit."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"],
+            capture_output=True, text=True,
+        )
+    except OSError:  # no git on PATH
+        return None
+    return r.stdout.strip() or None
+
+
+def path_for(ref: str) -> Path:
+    """Resolve a `diff` argument: an existing file, else the run recorded for a commit."""
+    if Path(ref).exists():
+        return Path(ref)
+    sha = commit_sha(ref)
+    if sha is None:
+        raise FileNotFoundError(f"{ref}: not a run file or a git commit")
+    path = RUN_DIR / f"{sha}.pyxt"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no run recorded for {ref}: check it out and `pyxtrace run SCRIPT`, "
+            f"or pass a .pyxt path"
+        )
+    return path
+
+
 def to_dict(
     stats: Dict[Tuple[str, str], Dict[str, Any]],
     *,
     root: Path,
     script: str,
+    commit: str | None = None,
 ) -> Dict[str, Any]:
     """Convert a ProfileTracer's raw stats into the serialisable run form."""
     functions: Dict[str, Any] = {}
@@ -52,6 +86,7 @@ def to_dict(
     return {
         "pyxtrace": FORMAT_VERSION,
         "script": script,
+        "commit": commit,
         "functions": dict(sorted(functions.items())),
     }
 
@@ -86,10 +121,10 @@ def load(path: str | Path) -> Dict[str, Any]:
     return data
 
 
-def top(run: Dict[str, Any], n: int = 10, by: str = "lines") -> Iterable[Tuple[str, Dict[str, Any]]]:
-    """Hottest functions first."""
+def top(run: Dict[str, Any], n: int = 10) -> Iterable[Tuple[str, Dict[str, Any]]]:
+    """Hottest functions first, by lines executed."""
     items = run["functions"].items()
-    return sorted(items, key=lambda kv: kv[1].get(by, 0), reverse=True)[:n]
+    return sorted(items, key=lambda kv: kv[1].get("lines", 0), reverse=True)[:n]
 
 
 # ────────────────────────────── diff ──────────────────────────────── #

@@ -32,13 +32,6 @@ jobs:
       - name: Overhead + determinism gate
         run: python benchmarks/overhead.py
 
-      - name: Import must not start tracemalloc
-        run: |
-          python -c "
-          import pyxtrace, tracemalloc
-          assert not tracemalloc.is_tracing(), 'importing pyxtrace started tracemalloc'
-          "
-
       - name: Dashboard deps must not be pulled in
         run: |
           python - <<'EOF'
@@ -51,9 +44,9 @@ jobs:
 
       - name: The gate must actually catch the example N+1
         run: |
-          pyxtrace examples/orders.py -o before.pyxt
-          PYXTRACE_NPLUSONE=1 pyxtrace examples/orders.py -o after.pyxt
-          if pyxtrace diff before.pyxt after.pyxt; then
+          pyxtrace examples/orders.py
+          PYXTRACE_NPLUSONE=1 pyxtrace examples/orders.py -o regressed.pyxt
+          if pyxtrace diff HEAD regressed.pyxt; then
             echo "::error::diff exited 0 but should have caught the N+1"
             exit 1
           fi

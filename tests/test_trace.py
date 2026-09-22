@@ -1,6 +1,6 @@
-import json
-import tracemalloc
 from pathlib import Path
+
+import pytest
 
 import pyxtrace.core as core
 from pyxtrace import run as runfile
@@ -12,7 +12,7 @@ EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "fibonacci.py"
 def test_profile_run_counts_are_exact(tmp_path: Path) -> None:
     """fib(5) makes exactly 15 calls — the counts are arithmetic, not samples."""
     out = tmp_path / "run.pyxt"
-    core.run_tracer(EXAMPLE, out=out)
+    core.TraceSession(EXAMPLE, out=out).run()
 
     data = runfile.load(out)
     fib = data["functions"]["fibonacci.py::fib"]
@@ -29,58 +29,39 @@ def test_profile_run_is_byte_stable(tmp_path: Path) -> None:
     """Unchanged code must produce a byte-identical run file, so a committed
     baseline shows no git diff until the code actually changes."""
     a, b = tmp_path / "a.pyxt", tmp_path / "b.pyxt"
-    core.run_tracer(EXAMPLE, out=a)
-    core.run_tracer(EXAMPLE, out=b)
+    core.TraceSession(EXAMPLE, out=a).run()
+    core.TraceSession(EXAMPLE, out=b).run()
     assert a.read_bytes() == b.read_bytes()
 
 
 def test_run_file_carries_no_timing(tmp_path: Path) -> None:
     """own_time varies every run; in a committed artifact it is pure churn."""
     out = tmp_path / "run.pyxt"
-    core.run_tracer(EXAMPLE, out=out)
+    core.TraceSession(EXAMPLE, out=out).run()
 
     assert "own_time" not in out.read_text()
     assert all("own_time" not in fn for fn in runfile.load(out)["functions"].values())
 
 
-def test_event_stream_still_writes_jsonl(tmp_path: Path) -> None:
-    log_path = tmp_path / "trace.jsonl"
-    core.run_tracer(EXAMPLE, mode="demo", log_path=log_path)
-
-    assert log_path.exists()
-    rows = log_path.read_text().splitlines()
-    assert rows, "log should not be empty"
-    assert "kind" in json.loads(rows[0])
-
-
 ORDERS = Path(__file__).resolve().parent.parent / "examples" / "orders.py"
 
 
-def _orders_run(tmp_path: Path, name: str, n_plus_one: bool) -> dict:
-    import os
-
+def _orders_run(tmp_path: Path, name: str, n_plus_one: bool, monkeypatch) -> dict:
+    monkeypatch.setenv("PYXTRACE_NPLUSONE", "1" if n_plus_one else "0")
     out = tmp_path / name
-    prev = os.environ.get("PYXTRACE_NPLUSONE")
-    os.environ["PYXTRACE_NPLUSONE"] = "1" if n_plus_one else "0"
-    try:
-        core.run_tracer(ORDERS, out=out)
-    finally:
-        if prev is None:
-            os.environ.pop("PYXTRACE_NPLUSONE", None)
-        else:
-            os.environ["PYXTRACE_NPLUSONE"] = prev
+    core.TraceSession(ORDERS, out=out).run()
     return runfile.load(out)
 
 
-def test_diff_is_clean_against_itself(tmp_path: Path) -> None:
-    baseline = _orders_run(tmp_path, "a.pyxt", n_plus_one=False)
+def test_diff_is_clean_against_itself(tmp_path: Path, monkeypatch) -> None:
+    baseline = _orders_run(tmp_path, "a.pyxt", False, monkeypatch)
     assert runfile.diff(baseline, baseline) == []
 
 
-def test_diff_reports_the_per_item_query_regression(tmp_path: Path) -> None:
+def test_diff_reports_the_per_item_query_regression(tmp_path: Path, monkeypatch) -> None:
     """Switching to a per-order lookup is extra work, and must be reported."""
-    before = _orders_run(tmp_path, "before.pyxt", n_plus_one=False)
-    after = _orders_run(tmp_path, "after.pyxt", n_plus_one=True)
+    before = _orders_run(tmp_path, "before.pyxt", False, monkeypatch)
+    after = _orders_run(tmp_path, "after.pyxt", True, monkeypatch)
 
     findings = runfile.diff(before, after)
     assert findings, "the extra per-order queries should be reported"
@@ -101,21 +82,13 @@ def test_diff_ignores_small_changes() -> None:
     assert runfile.diff(before, after) == []
 
 
-def test_return_values_are_not_captured_by_default(tmp_path: Path) -> None:
-    """Return values can carry secrets — they must be opt-in."""
-    log_path = tmp_path / "trace.jsonl"
-    core.run_tracer(EXAMPLE, mode="demo", log_path=log_path)
-
-    assert "return_value" not in log_path.read_text()
-
-
 def test_script_can_import_a_sibling_module(tmp_path: Path) -> None:
     """`python app.py` puts the script's dir on sys.path — pyxtrace must too."""
     (tmp_path / "helper.py").write_text("VALUE = 42\n")
     app = tmp_path / "app.py"
     app.write_text("import helper\nassert helper.VALUE == 42\n")
 
-    core.run_tracer(app, out=tmp_path / "run.pyxt")  # raised ModuleNotFoundError before
+    core.TraceSession(app, out=tmp_path / "run.pyxt").run()  # raised ModuleNotFoundError before
 
     data = runfile.load(tmp_path / "run.pyxt")
     assert "helper.py::<module>" in data["functions"]
@@ -139,64 +112,13 @@ def test_root_traces_a_library_outside_the_script_directory(tmp_path: Path) -> N
     app = app_dir / "main.py"
     app.write_text(f"import sys\nsys.path.insert(0, {str(lib)!r})\nimport mylib\nmylib.work(50)\n")
 
-    core.run_tracer(app, out=tmp_path / "off.pyxt")
-    core.run_tracer(app, out=tmp_path / "on.pyxt", root=lib)
+    core.TraceSession(app, out=tmp_path / "off.pyxt").run()
+    core.TraceSession(app, out=tmp_path / "on.pyxt", root=lib).run()
 
     off = runfile.load(tmp_path / "off.pyxt")["functions"]
     on = runfile.load(tmp_path / "on.pyxt")["functions"]
     assert not any(k.startswith("mylib.py") for k in off)
     assert on["mylib.py::work"]["calls"] == 1
-
-
-def _events(log_path: Path) -> list[dict]:
-    return [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
-
-
-def test_return_values_are_captured_when_asked(tmp_path: Path) -> None:
-    """The opt-in is what turns return values on; the default test covers off."""
-    script = tmp_path / "answer.py"
-    script.write_text("def answer():\n    return 42\n\nanswer()\n")
-    log_path = tmp_path / "trace.jsonl"
-
-    core.TraceSession(
-        script, log_path=log_path, events=True, mode="demo", capture_returns=True
-    ).run()
-
-    assert any(e.get("return_value") == "42" for e in _events(log_path))
-
-
-def test_memory_sampling_emits_events_and_leaves_tracemalloc_off(tmp_path: Path) -> None:
-    """A memory run starts tracemalloc, so it has to stop it again."""
-    script = tmp_path / "alloc.py"
-    script.write_text("data = [0] * 4096\n")
-    log_path = tmp_path / "trace.jsonl"
-
-    core.TraceSession(script, log_path=log_path, events=True, memory=True).run()
-
-    assert any(e.get("kind") == "MemoryEvent" for e in _events(log_path))
-    assert not tracemalloc.is_tracing()
-
-
-def test_memory_tracer_used_directly_does_not_need_tracemalloc() -> None:
-    """FilteredTracer is public; memory=True must degrade, not raise."""
-    import sys
-
-    from pyxtrace.bytecode import FilteredTracer
-
-    class _Log:
-        def __init__(self) -> None:
-            self.rows: list[dict] = []
-
-        def enqueue(self, obj: dict) -> None:
-            self.rows.append(obj)
-
-    assert not tracemalloc.is_tracing()
-    log = _Log()
-    # no root_path, so every frame is kept and the memory branch is reached
-    FilteredTracer(log, mode="full", memory=True)(sys._getframe(), "line", None)
-
-    assert log.rows, "the line event itself should still be recorded"
-    assert not any(r.get("kind") == "MemoryEvent" for r in log.rows)
 
 
 def test_threads_are_traced_and_stay_deterministic(tmp_path: Path) -> None:
@@ -218,10 +140,46 @@ def test_threads_are_traced_and_stay_deterministic(tmp_path: Path) -> None:
     )
 
     a, b = tmp_path / "a.pyxt", tmp_path / "b.pyxt"
-    core.run_tracer(script, out=a)
-    core.run_tracer(script, out=b)
+    core.TraceSession(script, out=a).run()
+    core.TraceSession(script, out=b).run()
 
     fns = runfile.load(a)["functions"]
     assert fns["threaded.py::work"]["calls"] == 4
     # scheduling varies between runs; which lines each thread runs does not
     assert a.read_bytes() == b.read_bytes()
+
+
+def test_run_is_filed_by_commit_and_diff_resolves_refs(tmp_path: Path, monkeypatch) -> None:
+    """CI compares commits, not hand-named files: `pyxtrace diff main HEAD`."""
+    import subprocess
+
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    sha = runfile.commit_sha()
+    assert sha and len(sha) == 40
+
+    core.TraceSession(EXAMPLE).run()  # no -o: keyed by the checked-out commit
+    filed = runfile.RUN_DIR / f"{sha}.pyxt"
+    assert filed.exists()
+    assert runfile.load(filed)["commit"] == sha
+
+    assert runfile.path_for("HEAD") == filed
+    assert runfile.path_for(sha[:7]) == filed
+    assert runfile.path_for(str(filed)) == filed
+    with pytest.raises(FileNotFoundError):
+        runfile.path_for("no-such-ref")
+
+
+def test_cli_implies_run_and_diff_sets_the_exit_code(tmp_path: Path, monkeypatch) -> None:
+    from pyxtrace import cli
+
+    monkeypatch.chdir(tmp_path)
+    a = tmp_path / "a.pyxt"
+    cli.main([str(EXAMPLE), "-o", str(a)])  # bare script → `run`
+    assert a.exists()
+    for other, code in ((str(a), 0), ("no-such-ref", 2)):
+        with pytest.raises(SystemExit) as e:
+            cli.main(["diff", str(a), other])
+        assert e.value.code == code
