@@ -1,25 +1,46 @@
 name: publish
 
+# Merge to main → if pyproject.toml's version is not on PyPI yet, the publish job
+# waits for a reviewer to approve it in the Actions UI (the `pypi` environment
+# requires one), then uploads via trusted publishing. Nothing to do for merges
+# that leave the version alone.
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  pypi:
+  check:
     runs-on: ubuntu-latest
-    environment: pypi
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      new: ${{ steps.v.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if curl -sf "https://pypi.org/pypi/pyxtrace/$version/json" >/dev/null; then new=false; else new=true; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "pyxtrace $version — $([ $new = true ] && echo 'not on PyPI, publish needs approval' || echo 'already on PyPI, nothing to do')"
+
+  pypi:
+    needs: check
+    if: needs.check.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi   # required reviewer → approve/reject prompt in the Actions UI
     permissions:
       id-token: write   # PyPI trusted publishing (OIDC); no token stored anywhere
-      contents: read
+      contents: write   # to tag the release after a successful upload
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Release tag must match the package version
-        run: |
-          pkg=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          tag="${GITHUB_REF_NAME#v}"
-          test "$tag" = "$pkg" || { echo "::error::tag v$tag but pyproject.toml says $pkg — bump the version first"; exit 1; }
       - run: pip install build && python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Tag and create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ needs.check.outputs.version }}" --generate-notes --title "v${{ needs.check.outputs.version }}"
