@@ -48,12 +48,9 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
     # sits outside the script's directory and is filtered out silently.
     if {name.split("::", 1)[0] for name in functions} <= {run.get("script", "")}:
         c.print(
-            "[yellow]Warning: only the entry script was traced.[/] pyxTrace "
-            "profiles code under the script's own directory, so a library "
-            "installed in site-packages or living outside that directory "
-            "recorded nothing. This run is effectively empty, and a baseline "
-            "saved from it will never detect a regression. Pass --root "
-            "<package dir> to profile it."
+            "[yellow]Note: only the entry script was traced.[/] If the code you "
+            "care about lives elsewhere — in site-packages or another directory — "
+            "pass --root <dir>, or a baseline saved from this run will never see it."
         )
     if path:
         c.print(f"[dim]run saved to {path}[/]")

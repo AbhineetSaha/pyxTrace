@@ -60,8 +60,8 @@ class TraceSession:
                 del sys.path[0]
 
     # ------------------------------------------------------------------ #
-    def run(self) -> None:
-        """Accumulate per-function totals and write a .pyxt run."""
+    def run(self) -> dict:
+        """Accumulate per-function totals and write a .pyxt run; returns the run dict."""
         sha = commit_sha()
         # keyed by commit, so `diff main HEAD` works; -o overrides. Resolved now:
         # the script may chdir, and the file is written after it finishes.
@@ -78,3 +78,4 @@ class TraceSession:
         data = to_dict(tracer.stats, root=root, script=self.script_path.name, commit=sha)
         save(data, out)
         render_run(data, out)
+        return data
