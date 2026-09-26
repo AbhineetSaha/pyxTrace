@@ -21,7 +21,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pyxtrace")           # installed dist
 except PackageNotFoundError:                    # source checkout on sys.path
-    __version__ = "2.1.0"
+    __version__ = "3.0.0"
 
 from .bytecode import ProfileTracer
 from .core import TraceSession

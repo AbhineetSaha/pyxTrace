@@ -248,7 +248,7 @@ def test_diff_warns_when_runs_come_from_different_pythons(tmp_path: Path, capsys
 
     fn = {"x.py::f": {"calls": 1, "lines": 2, "callees": {}}}
     for name, py in (("a.pyxt", "cpython-3.11"), ("b.pyxt", "cpython-3.12")):
-        runfile.save({"pyxtrace": 1, "python": py, "script": "x.py", "functions": fn},
+        runfile.save({"pyxtrace": runfile.FORMAT_VERSION, "python": py, "script": "x.py", "functions": fn},
                      tmp_path / name)
 
     with pytest.raises(SystemExit):

@@ -29,7 +29,7 @@ class Cursor:
 
 
 def fetch_orders(cur: Cursor, limit: int) -> list[dict]:
-    rows = cur.execute("SELECT id, customer_id FROM orders LIMIT %s", limit)
+    cur.execute("SELECT id, customer_id FROM orders LIMIT %s", limit)
     return [{"id": i, "customer_id": i % 20} for i in range(limit)]
 
 

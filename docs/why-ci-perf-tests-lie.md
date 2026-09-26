@@ -97,10 +97,9 @@ for all of them. Someone refactors, and now each order fetches its own customer:
 
 ```
 ⚠  orders.py::process_order  +120 calls to other functions  (same code, more work)
+   process_order() runs 120x and makes 1 more call(s) to fetch_customer() each time
    Attributed to:
      orders.py::fetch_customer   0 → 120 calls   new
-   Pattern detected: N+1 — process_order() runs 120x and calls fetch_customer() 1x each
-     120 total calls to fetch_customer(), was 0. Batch it outside the loop.
 
 ✗ FAIL — exit code 1
 ```

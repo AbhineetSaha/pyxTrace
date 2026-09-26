@@ -9,14 +9,20 @@ cached form).
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from collections import Counter
+from operator import attrgetter
 from pathlib import Path
 from types import FrameType
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
-Key = Tuple[str, str]  # (file, function)
+Key = Tuple[str, str]  # (file, qualified function name)
+
+# `Cursor.execute`, not `execute`: two classes' `__init__` in one file must not
+# merge into one entry. co_qualname is 3.11+; 3.10 falls back to the bare name.
+_qualname = attrgetter("co_qualname" if sys.version_info >= (3, 11) else "co_name")
 
 
 def in_root(filename: str, root: Path, cache: Dict[str, bool]) -> bool:
@@ -52,34 +58,46 @@ class ProfileTracer:
     ``callees`` records how many times each function called each other
     function, which is what attributes a regression to the call that caused it.
 
-    The call stack is per-thread, so a script that starts threads is counted
-    correctly once ``threading.settrace`` is in place.  ``stats`` itself is
-    shared and unguarded.
+    Every thread counts into its own shard, merged when ``stats`` is read, so
+    no counter is ever shared between threads: a lost update would make the
+    counts nondeterministic, and nothing but the GIL would prevent one.
     """
-    # ponytail: shared stats dict relies on the GIL making a dict-item += safe
-    # enough. Measured identical across 5 runs with 4 threads; needs real locking
-    # for free-threaded builds.
 
     def __init__(self, *, root_path: str | Path | None = None) -> None:
         self._root = None if root_path is None else Path(root_path).resolve()
         self._keep: Dict[str, bool] = {}
-        self.stats: Dict[Key, Dict[str, Any]] = {}
+        # one shard per thread that ever ran traced code; list.append is atomic
+        self._shards: List[Dict[Key, Dict[str, Any]]] = []
         # frames in flight: [key, entered_at, time spent in callees, stats dict]
         # one stack per thread: sys.settrace is per-thread, and a shared list
         # would interleave frames from different threads into one call chain
         self._local = threading.local()
 
     # ------------------------------------------------------------------ #
-    def _rec(self, key: Key) -> Dict[str, Any]:
-        s = self.stats.get(key)
-        if s is None:
-            s = self.stats[key] = {
-                "calls": 0,
-                "lines": 0,
-                "own_time": 0.0,
-                "callees": Counter(),
-            }
-        return s
+    @property
+    def stats(self) -> Dict[Key, Dict[str, Any]]:
+        """Per-function totals across every thread."""
+        merged: Dict[Key, Dict[str, Any]] = {}
+        for shard in list(self._shards):
+            # dict() copies in one C call, so a daemon thread still running
+            # cannot change a shard's size under this loop
+            for key, s in dict(shard).items():
+                m = merged.get(key)
+                if m is None:
+                    m = merged[key] = _new_rec()
+                m["calls"] += s["calls"]
+                m["lines"] += s["lines"]
+                m["own_time"] += s["own_time"]
+                m["callees"].update(dict(s["callees"]))
+        return merged
+
+    def _shard(self) -> Dict[Key, Dict[str, Any]]:
+        try:
+            return self._local.shard
+        except AttributeError:
+            shard = self._local.shard = {}
+            self._shards.append(shard)
+            return shard
 
     # ------------------------------------------------------------------ #
     # Hot path.  Branches are ordered by event frequency (line > call >
@@ -107,8 +125,11 @@ class ProfileTracer:
                 code.co_filename, self._root, self._keep
             ):
                 return None
-            key = (code.co_filename, code.co_name)
-            s = self._rec(key)
+            key = (code.co_filename, _qualname(code))
+            shard = self._shard()
+            s = shard.get(key)
+            if s is None:
+                s = shard[key] = _new_rec()
             s["calls"] += 1
             if stack:
                 # ponytail: an untraced frame between caller and callee shifts
@@ -133,3 +154,5 @@ class ProfileTracer:
         return self
 
 
+def _new_rec() -> Dict[str, Any]:
+    return {"calls": 0, "lines": 0, "own_time": 0.0, "callees": Counter()}

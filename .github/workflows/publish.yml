@@ -38,6 +38,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - name: Tests must pass on the commit being released
+        run: |
+          pip install -e . pytest
+          pytest -q
       - run: pip install build && python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
       - name: Tag and create the GitHub release
