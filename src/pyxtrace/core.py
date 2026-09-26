@@ -12,7 +12,7 @@ from pathlib import Path
 from types import ModuleType
 
 from pyxtrace.bytecode import ProfileTracer
-from pyxtrace.run import RUN_DIR, commit_sha, save, to_dict
+from pyxtrace.run import RUN_DIR, commit_sha, run_name, save, to_dict, worktree_dirty
 from pyxtrace.visual import render_run
 
 
@@ -51,6 +51,11 @@ class TraceSession:
             threading.settrace(tracer)
             try:
                 spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            except SystemExit as e:
+                # `sys.exit(main())` is how most scripts end. A clean exit is a
+                # finished run; anything else is a failed one and propagates.
+                if e.code not in (None, 0):
+                    raise
             finally:
                 sys.settrace(None)
                 threading.settrace(None)  # type: ignore[arg-type]
@@ -65,17 +70,22 @@ class TraceSession:
         sha = commit_sha()
         # keyed by commit, so `diff main HEAD` works; -o overrides. Resolved now:
         # the script may chdir, and the file is written after it finishes.
-        out = Path(self.out) if self.out else RUN_DIR.resolve() / f"{sha or 'untracked'}.pyxt"
+        out = Path(self.out) if self.out else RUN_DIR.resolve() / run_name(sha, worktree_dirty())
         root = self.trace_root
 
         print(f"[pyxTrace] ➜ profiling '{self.script_path}' → {out}")
         tracer = ProfileTracer(root_path=root)
         try:
             self._exec_script(tracer)
-        finally:
-            print("[pyxTrace] ✔ finished")
+        except BaseException:
+            # a partial count is not a baseline anyone should compare against
+            print("[pyxTrace] ✘ script failed — no run recorded", file=sys.stderr)
+            raise
 
+        # saved before anything is printed: `pyxtrace app.py | head` closes the
+        # pipe, and the run should survive the output being cut short
         data = to_dict(tracer.stats, root=root, script=self.script_path.name, commit=sha)
         save(data, out)
+        print("[pyxTrace] ✔ finished")
         render_run(data, out)
         return data

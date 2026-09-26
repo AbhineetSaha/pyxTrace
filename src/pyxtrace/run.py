@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
 
@@ -47,6 +48,36 @@ def commit_sha(rev: str = "HEAD") -> str | None:
     return r.stdout.strip() or None
 
 
+def worktree_dirty() -> bool:
+    """Do tracked files differ from HEAD?  False outside a git repo.
+
+    Untracked files are ignored: `.pyxtrace/` itself is usually one, and a new
+    module only changes the run once something tracked imports it.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True, text=True,
+        )
+    except OSError:
+        return False
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
+def run_name(sha: str | None, dirty: bool = False) -> str:
+    """File name for a run of commit *sha*.
+
+    Uncommitted changes get their own name, so experimenting locally never
+    overwrites the clean run recorded for the commit underneath them.
+    """
+    return f"{sha or 'untracked'}{'-dirty' if dirty else ''}.pyxt"
+
+
+def current_run() -> Path:
+    """The run file for the checkout as it is right now, committed or not."""
+    return RUN_DIR / run_name(commit_sha(), worktree_dirty())
+
+
 def path_for(ref: str) -> Path:
     """Resolve a `diff` argument: an existing file, else the run recorded for a commit."""
     if Path(ref).exists():
@@ -54,13 +85,36 @@ def path_for(ref: str) -> Path:
     sha = commit_sha(ref)
     if sha is None:
         raise FileNotFoundError(f"{ref}: not a run file or a git commit")
-    path = RUN_DIR / f"{sha}.pyxt"
+    path = RUN_DIR / run_name(sha)
     if not path.exists():
+        dirty = RUN_DIR / run_name(sha, dirty=True)
+        hint = (
+            f" (there is a run of uncommitted changes on top of it: {dirty})"
+            if dirty.exists() else ""
+        )
         raise FileNotFoundError(
             f"no run recorded for {ref}: check it out and `pyxtrace run SCRIPT`, "
-            f"or pass a .pyxt path"
+            f"or pass a .pyxt path{hint}"
         )
     return path
+
+
+def interpreter() -> str:
+    """e.g. ``cpython-3.12``.  Line events shift between minor versions (3.12
+    inlined comprehensions), so counts are only comparable within one."""
+    v = sys.version_info
+    return f"{sys.implementation.name}-{v.major}.{v.minor}"
+
+
+def interpreter_mismatch(before: Dict[str, Any], after: Dict[str, Any]) -> str | None:
+    """Describe a Python version difference between two runs, if there is one.
+
+    Runs written before the field existed carry no version and are trusted.
+    """
+    b, a = before.get("python"), after.get("python")
+    if b and a and b != a:
+        return f"{b} vs {a}"
+    return None
 
 
 def to_dict(
@@ -85,6 +139,7 @@ def to_dict(
         }
     return {
         "pyxtrace": FORMAT_VERSION,
+        "python": interpreter(),
         "script": script,
         "commit": commit,
         "functions": dict(sorted(functions.items())),

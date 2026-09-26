@@ -64,6 +64,16 @@ def _fmt_pct(pct: float | None) -> str:
     return f"{pct:+,.0f}%"
 
 
+def render_interpreter_mismatch(versions: str, console: Console | None = None) -> None:
+    """Warn before a diff whose two runs came from different Python versions."""
+    c = console or Console()
+    c.print(
+        f"[bold yellow]⚠  Different Python versions: {versions}[/]\n"
+        "   Line counts shift between minor versions, so findings below may come from\n"
+        "   the interpreter rather than your code. Record both runs on the same Python."
+    )
+
+
 def render_diff(findings: list, *, threshold: float, console: Console | None = None) -> None:
     """Print the regression report.  Empty findings → a clean PASS."""
     c = console or Console()

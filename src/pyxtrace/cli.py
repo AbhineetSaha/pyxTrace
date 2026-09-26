@@ -5,6 +5,7 @@ pyxTrace command-line interface
     pyxtrace app.py                        # same thing, `run` is implied
     pyxtrace diff main HEAD                # regression gate, exits 1 on failure
     pyxtrace diff a.pyxt b.pyxt            # explicit run files work too
+    pyxtrace diff main                     # main vs. the checkout as it is now
     pyxtrace run app.py -- --epochs 10     # args after `--` go to the script
 """
 from __future__ import annotations
@@ -14,8 +15,8 @@ import sys
 from pathlib import Path
 
 from pyxtrace import core
-from pyxtrace.run import diff, load, path_for
-from pyxtrace.visual import render_diff
+from pyxtrace.run import current_run, diff, interpreter_mismatch, load, path_for
+from pyxtrace.visual import render_diff, render_interpreter_mismatch
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -35,7 +36,9 @@ def _parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("diff", help="compare two runs and exit 1 on a performance regression")
     d.add_argument("before", help="commit (main, HEAD, a sha) or .pyxt path")
-    d.add_argument("after", help="commit (main, HEAD, a sha) or .pyxt path")
+    d.add_argument("after", nargs="?",
+                   help="commit or .pyxt path (default: the current checkout, "
+                        "including uncommitted changes)")
     d.add_argument("-t", "--threshold", type=float, default=10.0,
                    help="fail if a function grows more than this percent (default 10)")
     d.add_argument("--min-ops", type=int, default=10,
@@ -64,9 +67,19 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     try:
-        before, after = path_for(a.before), path_for(a.after)
+        before = path_for(a.before)
+        after = path_for(a.after) if a.after else current_run()
+        if not after.exists():
+            raise FileNotFoundError(
+                f"no run recorded for the current checkout ({after}): "
+                f"`pyxtrace run SCRIPT` first"
+            )
     except FileNotFoundError as e:
         p.error(str(e))
-    findings = diff(load(before), load(after), threshold=a.threshold, min_ops=a.min_ops)
+    b_run, a_run = load(before), load(after)
+    mismatch = interpreter_mismatch(b_run, a_run)
+    if mismatch:
+        render_interpreter_mismatch(mismatch)
+    findings = diff(b_run, a_run, threshold=a.threshold, min_ops=a.min_ops)
     render_diff(findings, threshold=a.threshold)
     sys.exit(1 if findings else 0)
