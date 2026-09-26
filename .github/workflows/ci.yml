@@ -6,13 +6,42 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash   # one syntax on every OS, Windows included
+
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check .
+      - name: Mypy
+        run: mypy
+
+  test:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          # free-threaded: no GIL, so any counter shared between threads races
+          - { os: ubuntu-latest, python-version: "3.14t" }
+          - { os: windows-latest, python-version: "3.10" }
+          - { os: windows-latest, python-version: "3.14" }
+          - { os: macos-latest, python-version: "3.10" }
+          - { os: macos-latest, python-version: "3.14" }
 
     steps:
       - uses: actions/checkout@v4
@@ -22,14 +51,17 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install
+        # the dev extra is lint tooling; mypy has no free-threaded wheels
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e . pytest
 
       - name: Tests
         run: pytest -q
 
       - name: Overhead + determinism gate
+        # a timing ratio: only meaningful on the runner it was sized against
+        if: runner.os == 'Linux'
         run: python benchmarks/overhead.py
 
       - name: Dashboard deps must not be pulled in
@@ -46,8 +78,45 @@ jobs:
         run: |
           pyxtrace examples/orders.py
           PYXTRACE_NPLUSONE=1 pyxtrace examples/orders.py -o regressed.pyxt
-          if pyxtrace diff HEAD regressed.pyxt; then
-            echo "::error::diff exited 0 but should have caught the N+1"
+          # exactly 1: 0 would be a miss, and 2 a usage error, not a catch
+          code=0; pyxtrace diff HEAD regressed.pyxt || code=$?
+          if [ "$code" != 1 ]; then
+            echo "::error::diff exited $code; it should exit 1 on the N+1"
             exit 1
           fi
           echo "regression correctly detected"
+
+  package:
+    # what PyPI would receive: build it, check it, install it cold, use it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build
+        run: |
+          pip install build twine
+          python -m build 2>&1 | tee build.log
+          if grep -qiE 'deprecat|warning' build.log; then
+            echo "::error::the build printed warnings; fix them before they become errors"
+            exit 1
+          fi
+          twine check --strict dist/*
+      - name: Install the wheel into a clean venv and run the gate from it
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          cd "$(mktemp -d)"
+          cp "$GITHUB_WORKSPACE/examples/orders.py" .
+          git init -q
+          git add orders.py
+          git -c user.email=ci@example.com -c user.name=ci commit -qm base
+          /tmp/clean/bin/pyxtrace --version
+          /tmp/clean/bin/pyxtrace orders.py
+          PYXTRACE_NPLUSONE=1 /tmp/clean/bin/pyxtrace orders.py -o regressed.pyxt
+          code=0; /tmp/clean/bin/pyxtrace diff HEAD regressed.pyxt || code=$?
+          if [ "$code" != 1 ]; then
+            echo "::error::the installed wheel's diff exited $code; it should exit 1"
+            exit 1
+          fi

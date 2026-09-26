@@ -9,7 +9,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from pyxtrace.run import top
+from pyxtrace.run import only_entry_script, top
 
 
 # ───────────────────────────── run summary ───────────────────────────
@@ -19,8 +19,9 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
     functions = run.get("functions", {})
     if not functions:
         c.print(
-            "[yellow]No functions traced.[/] Only code under the script's own "
-            "directory is profiled — check that the script is where you expect."
+            "[yellow]No functions traced.[/] Only code under the trace root is "
+            "profiled — the script's own directory, or --root. Check that it "
+            "contains the script or the code you mean to measure."
         )
         return
 
@@ -46,7 +47,7 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
     # The entry script is always traced, so the "no functions" case above never
     # fires for the common real failure: an installed or out-of-tree library
     # sits outside the script's directory and is filtered out silently.
-    if {name.split("::", 1)[0] for name in functions} <= {run.get("script", "")}:
+    if only_entry_script(run):
         c.print(
             "[yellow]Note: only the entry script was traced.[/] If the code you "
             "care about lives elsewhere — in site-packages or another directory — "
@@ -87,8 +88,9 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
             head = "new" if f["is_new"] else _fmt_pct(f["pct"])
             detail = f"[red]{head} operations[/]  ([dim]{f['lines_before']:,} → {f['lines_after']:,}[/])"
         else:
-            # flagged for its call pattern, not its own operation count
-            added = sum(r["after"] - r["before"] for r in f["callees"])
+            # flagged for its call pattern, not its own operation count; name
+            # the growth, since other callees may have shrunk in the same change
+            added = max(r["after"] - r["before"] for r in f["callees"])
             detail = f"[red]+{added:,} calls to other functions[/]  [dim](same code, more work)[/]"
         c.print(f"\n[bold red]⚠[/]  [bold]{f['name']}[/]  {detail}")
 
