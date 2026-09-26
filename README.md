@@ -63,6 +63,15 @@ pyxtrace diff HEAD~1 HEAD              # any git ref, or a .pyxt path
 
 `diff` exits **1** when something regressed, so it drops straight into CI.
 
+Before committing, compare your uncommitted work against any commit. A run with
+uncommitted changes is filed separately, so it never overwrites the commit's
+clean run:
+
+```bash
+pyxtrace examples/orders.py            # → .pyxtrace/<sha>-dirty.pyxt
+pyxtrace diff main                     # main vs. the checkout as it is now
+```
+
 ### What a caught regression looks like
 
 The bundled example has a batched customer lookup. Set `PYXTRACE_NPLUSONE=1` and
@@ -129,15 +138,16 @@ the head and diffs them by name:
 ```
 
 Because the counts are exact, the base run can be recorded once and cached
-(`actions/cache` on `.pyxtrace/`) instead of re-run per PR; the same commit
-always produces the same bytes.
+(`actions/cache` on `.pyxtrace/`) instead of re-run per PR: the same commit on
+the same Python version always produces the same bytes. Put the Python version
+in the cache key — see *Limits*.
 
 ## Options
 
 | Command | What it does |
 |---|---|
 | `pyxtrace run SCRIPT` | Profile → `.pyxtrace/<commit sha>.pyxt` (`run` is optional; `-o` overrides) |
-| `pyxtrace diff BASE HEAD` | Compare two commits (or `.pyxt` paths); exit 1 on regression |
+| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
 | `--root DIR` | Profile this directory instead of the script's own, for an installed or out-of-tree package |
@@ -175,6 +185,11 @@ Stated plainly, because a profiler that hides these is worse than none:
 - **Only code under one root directory** is profiled — the script's own
   directory by default, or `--root DIR`. Anything outside it is skipped, and a
   run that captured nothing but the entry script says so.
+- **Counts are exact per Python minor version, not across them.** The
+  interpreter decides which lines emit events, and that changes between
+  releases: 3.12 inlined comprehensions, so upgrading from 3.11 moves line
+  counts with no code change. Record both sides of a diff on the same Python;
+  each run file records its interpreter and `diff` warns when they differ.
 - **Operation counts are a proxy for cost, not a measure of it.** An algorithmic
   change can cut operations and still be slower. Gate on counts, then confirm
   with a real timer.

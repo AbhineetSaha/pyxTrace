@@ -183,3 +183,79 @@ def test_cli_implies_run_and_diff_sets_the_exit_code(tmp_path: Path, monkeypatch
         with pytest.raises(SystemExit) as e:
             cli.main(["diff", str(a), other])
         assert e.value.code == code
+
+
+def test_a_clean_sys_exit_still_records_the_run(tmp_path: Path) -> None:
+    """`sys.exit(main())` is how most scripts end; it wrote nothing and exited 0."""
+    app = tmp_path / "app.py"
+    app.write_text("import sys\ndef main():\n    return 0\nsys.exit(main())\n")
+
+    core.TraceSession(app, out=tmp_path / "run.pyxt").run()
+    assert "app.py::main" in runfile.load(tmp_path / "run.pyxt")["functions"]
+
+
+@pytest.mark.parametrize("body, exc", [
+    ("import sys\nsys.exit(3)\n", SystemExit),
+    ("raise ValueError('boom')\n", ValueError),
+])
+def test_a_failed_script_records_nothing(tmp_path: Path, body: str, exc: type) -> None:
+    """Counts from a run that died partway are not a baseline to compare against."""
+    app = tmp_path / "app.py"
+    app.write_text(body)
+
+    with pytest.raises(exc):
+        core.TraceSession(app, out=tmp_path / "run.pyxt").run()
+    assert not (tmp_path / "run.pyxt").exists()
+
+
+def _git(*args: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+                   check=True, capture_output=True)
+
+
+def test_uncommitted_changes_do_not_overwrite_the_commit_run(tmp_path: Path, monkeypatch) -> None:
+    """Experimenting locally filed the run under HEAD and clobbered its clean baseline."""
+    from pyxtrace import cli
+
+    monkeypatch.chdir(tmp_path)
+    app = tmp_path / "app.py"
+    app.write_text("def f():\n    return 1\nf()\n")
+    _git("init", "-q")
+    _git("add", "app.py")
+    _git("commit", "-qm", "x")
+    sha = runfile.commit_sha()
+
+    core.TraceSession(app).run()
+    clean = runfile.RUN_DIR / f"{sha}.pyxt"
+    committed = clean.read_bytes()
+
+    app.write_text("def f():\n" + "    x = 1\n" * 20 + "    return x\nf()\n")
+    core.TraceSession(app).run()
+    assert clean.read_bytes() == committed
+    assert (runfile.RUN_DIR / f"{sha}-dirty.pyxt").exists()
+
+    # `diff HEAD` with no second ref compares against the uncommitted run
+    with pytest.raises(SystemExit) as e:
+        cli.main(["diff", "HEAD"])
+    assert e.value.code == 1
+
+
+def test_diff_warns_when_runs_come_from_different_pythons(tmp_path: Path, capsys) -> None:
+    """3.12 inlined comprehensions: an interpreter upgrade alone moves line counts."""
+    from pyxtrace import cli
+
+    fn = {"x.py::f": {"calls": 1, "lines": 2, "callees": {}}}
+    for name, py in (("a.pyxt", "cpython-3.11"), ("b.pyxt", "cpython-3.12")):
+        runfile.save({"pyxtrace": 1, "python": py, "script": "x.py", "functions": fn},
+                     tmp_path / name)
+
+    with pytest.raises(SystemExit):
+        cli.main(["diff", str(tmp_path / "a.pyxt"), str(tmp_path / "b.pyxt")])
+    assert "different python versions: cpython-3.11 vs cpython-3.12" in capsys.readouterr().out.lower()
+
+
+def test_run_records_the_interpreter(tmp_path: Path) -> None:
+    core.TraceSession(EXAMPLE, out=tmp_path / "run.pyxt").run()
+    assert runfile.load(tmp_path / "run.pyxt")["python"] == runfile.interpreter()
