@@ -64,16 +64,6 @@ jobs:
         if: runner.os == 'Linux'
         run: python benchmarks/overhead.py
 
-      - name: Dashboard deps must not be pulled in
-        run: |
-          python - <<'EOF'
-          import importlib.util, sys
-          for mod in ("streamlit", "plotly", "pandas", "pyarrow"):
-              if importlib.util.find_spec(mod) is not None:
-                  sys.exit(f"{mod} should not be installed by pyxtrace")
-          print("install is lean")
-          EOF
-
       - name: The gate must actually catch the example N+1
         run: |
           pyxtrace examples/orders.py

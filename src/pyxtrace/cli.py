@@ -14,6 +14,7 @@ Exit status: 0 pass, 1 regression found (or the traced script failed),
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -37,8 +38,9 @@ _COMMANDS = ("run", "diff")
 def _non_negative(kind):
     def parse(text: str):
         value = kind(text)
-        if value < 0:
-            raise argparse.ArgumentTypeError(f"must be 0 or more, got {text}")
+        # nan compares false against every growth and would pass any regression
+        if not math.isfinite(value) or value < 0:
+            raise argparse.ArgumentTypeError(f"must be a number, 0 or more, got {text}")
         return value
     parse.__name__ = kind.__name__  # argparse names the type in its errors
     return parse
@@ -125,6 +127,14 @@ def main(argv: list[str] | None = None) -> None:
             p.error(f"{a.script}: no such script")
         if a.root is not None and not a.root.is_dir():
             p.error(f"--root {a.root}: no such directory")
+        # checked before the script runs, not after a long workload has finished
+        if a.out is not None:
+            if a.out.is_dir():
+                p.error(f"-o {a.out}: is a directory")
+            try:
+                a.out.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                p.error(f"-o {a.out}: cannot create {a.out.parent} ({e.strerror or e})")
         if not core.hash_seed_fixed() and sys.executable:
             _relaunch_with_fixed_hash_seed(_original_args(a, script_args))
         sys.argv = [str(a.script)] + script_args

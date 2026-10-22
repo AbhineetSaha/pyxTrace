@@ -30,7 +30,10 @@ or missing answer. Each has a regression test in `tests/test_hardening.py`.
 ### Wrong answers from `diff`
 
 - `--threshold 0` reported every unchanged function as a regression.
-- A negative `--threshold` or `--min-ops` was accepted; it is now an error.
+- `--threshold nan` switched the gate off: a +300% regression passed. A
+  negative, `nan` or `inf` setting is now an error.
+- Growth of exactly the threshold failed the gate, though the help, the docs
+  and the PASS line all say "more than". It now passes.
 - Runs from different Python versions are compared with a warning: line counts
   shift between minor versions (3.12 inlined comprehensions).
 - A run with uncommitted changes overwrote the clean run of the commit beneath
@@ -46,6 +49,9 @@ or missing answer. Each has a regression test in `tests/test_hardening.py`.
 - A directory named like a git ref (`main/`) crashed `diff`.
 - `pyxtrace app.py | head` lost the run to a broken pipe.
 - Output a Windows console could not encode crashed the command.
+- A path with square brackets (`[legacy]/mod.py`) was read as styling: the
+  report named a file that does not exist, and `[/]` crashed it.
+- A bad `-o` path is rejected before the script runs, not after the workload.
 - A relative `-o` path landed wherever the script had `chdir`ed to.
 - Embedding: the caller's tracer (coverage, a debugger) and `__main__` are
   restored after a run.
@@ -62,6 +68,9 @@ or missing answer. Each has a regression test in `tests/test_hardening.py`.
 - CI: ruff and mypy, Windows and macOS, Python 3.14 and free-threaded 3.14t, a
   check that the built wheel installs and catches a regression, and a gate that
   requires `diff` to exit exactly 1 (it used to accept a usage error).
-- Publishing runs the tests first.
+- Publishing runs the tests first, and a PyPI outage stops the job instead of
+  reading as "this version is not published yet".
+- The tracer is as fast as 2.1.0's despite the per-thread counters.
 - License metadata moved to the SPDX form (setuptools stops accepting the old
-  one in 2027). The unused `poetry.lock` is gone.
+  one in 2027). Removed: the unused `poetry.lock`, a stale internal handoff
+  note, and a CI check for dashboard dependencies dropped in 2.0.

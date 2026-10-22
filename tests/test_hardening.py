@@ -465,3 +465,75 @@ def test_run_files_are_valid_json_with_sorted_keys(tmp_path: Path) -> None:
     _run(ROOT / "examples" / "orders.py", out)
     text = out.read_text()
     assert text == json.dumps(json.loads(text), indent=2, sort_keys=True) + "\n"
+
+
+# ──────────────────────────── audit findings ─────────────────────────── #
+def test_a_nan_threshold_is_rejected(tmp_path: Path, capsys) -> None:
+    """nan compares false against every growth: a +300% regression passed."""
+    run = tmp_path / "a.pyxt"
+    runfile.save({"pyxtrace": runfile.FORMAT_VERSION, "script": "a.py", "functions": {}}, run)
+    for value in ("nan", "inf"):
+        with pytest.raises(SystemExit) as e:
+            cli.main(["diff", str(run), str(run), "--threshold", value])
+        assert e.value.code == 2
+
+
+def test_growth_of_exactly_the_threshold_passes() -> None:
+    """--help, the PASS line and the docs say "more than"; the code used >=."""
+    def run(lines: int) -> dict:
+        return {"functions": {"m.py::f": {"calls": 1, "lines": lines, "callees": {}}}}
+
+    assert runfile.diff(run(100), run(110), threshold=10) == []
+    assert len(runfile.diff(run(100), run(111), threshold=10)) == 1
+
+
+def test_names_with_brackets_are_printed_as_they_are(tmp_path: Path) -> None:
+    """Rich read `[legacy]` as a style tag: the report named a file `/mod.py`
+    that does not exist, and a `[/]` in a path crashed it."""
+    import io
+
+    from rich.console import Console
+
+    from pyxtrace.visual import render_diff, render_run
+
+    def run(lines: int) -> dict:
+        return {"script": "[x]/a.py", "functions": {
+            "[legacy]/mod.py::f": {"calls": 30, "lines": lines,
+                                    "callees": {"[/]odd.py::g": lines}}}}
+
+    out = io.StringIO()
+    console = Console(file=out, width=200)
+    render_run(run(30), console=console)
+    render_diff(runfile.diff(run(30), run(120), min_ops=1), threshold=10, console=console)
+    text = out.getvalue()
+    assert "[legacy]/mod.py::f" in text
+    assert "[/]odd.py::g" in text
+    assert "[x]/a.py" in text
+
+
+def test_a_bad_output_path_fails_before_the_script_runs(tmp_path: Path) -> None:
+    """It used to run the whole workload, then die in save() with a traceback."""
+    (tmp_path / "notadir").write_text("")
+    (tmp_path / "a.py").write_text("print('WORKLOAD RAN')\n")
+    for out in ("notadir/x.pyxt", "."):
+        r = _cli("a.py", "-o", out, cwd=tmp_path)
+        assert r.returncode == 2, r.stderr
+        assert "WORKLOAD RAN" not in r.stdout
+        assert "Traceback" not in r.stderr
+
+
+def test_a_run_that_cannot_be_saved_at_exit_fails_the_command(tmp_path: Path) -> None:
+    """When a run finishes at interpreter exit, an error there does not change
+    the exit status by itself: CI would have read a missing run as success."""
+    (tmp_path / "a.py").write_text(
+        "import os, shutil, threading, time\n"
+        "os.makedirs('out', exist_ok=True)\n"
+        "def later():\n"
+        "    time.sleep(0.3)\n"
+        "    shutil.rmtree('out')\n"
+        "    open('out', 'w').close()  # the run's folder becomes a file\n"
+        "threading.Thread(target=later).start()\n"
+    )
+    r = _cli("a.py", "-o", "out/a.pyxt", cwd=tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "could not record the run" in r.stderr

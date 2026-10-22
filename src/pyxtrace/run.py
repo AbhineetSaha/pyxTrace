@@ -308,7 +308,7 @@ def diff(
         callees = _callee_deltas(b, a)
 
         grew = delta > 0 and delta >= min_ops and (
-            pct is None or pct == float("inf") or pct >= threshold
+            pct is None or pct == float("inf") or pct > threshold
         )
         # A function that introduces extra work often does not grow itself, it
         # just calls something else more often. Without this the diff blames the
@@ -320,7 +320,6 @@ def diff(
         # growth instead cascades up the call chain (measured: 30+ findings per
         # commit on sqlglot, against 1-2 here).
         calls_before, calls_after = b.get("calls", 0), a.get("calls", 0)
-        extra_calls = sum(r["after"] - r["before"] for r in callees)
         delegated = (
             calls_after >= _MIN_REPEAT
             and calls_after <= calls_before * 1.1
@@ -340,7 +339,6 @@ def diff(
                 "calls_after": a.get("calls", 0),
                 "is_new": name not in b_fns,
                 "callees": callees,
-                "extra_calls": extra_calls,
                 "delegated": delegated,
             }
         )

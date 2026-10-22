@@ -118,6 +118,7 @@ class TraceSession:
         sha = commit_sha()
         out = self.out or RUN_DIR.resolve() / run_name(sha, worktree_dirty())
         root = self.trace_root
+        out.parent.mkdir(parents=True, exist_ok=True)  # fail before the workload, not after
 
         print(f"[pyxTrace] ➜ profiling '{self.script_path}' → {out}")
         if not hash_seed_fixed():

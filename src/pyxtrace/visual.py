@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from pyxtrace.run import only_entry_script, top
@@ -25,7 +26,7 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
         )
         return
 
-    tbl = Table(title=f"pyxTrace – {run.get('script', '')}", title_style="bold blue")
+    tbl = Table(title=f"pyxTrace – {escape(run.get('script', ''))}", title_style="bold blue")
     tbl.add_column("function", style="cyan", no_wrap=False)
     tbl.add_column("calls", justify="right", style="green")
     tbl.add_column("lines", justify="right", style="magenta")
@@ -33,7 +34,7 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
 
     for name, s in top(run, 10):
         tbl.add_row(
-            name,
+            escape(name),
             f"{s['calls']:,}",
             f"{s['lines']:,}",
             f"{s.get('own_time', 0.0) * 1e3:.1f}",
@@ -54,7 +55,7 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
             "pass --root <dir>, or a baseline saved from this run will never see it."
         )
     if path:
-        c.print(f"[dim]run saved to {path}[/]")
+        c.print(f"[dim]run saved to {escape(str(path))}[/]")
 
 
 def _fmt_pct(pct: float | None) -> str:
@@ -84,33 +85,36 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
         return
 
     for f in findings:
+        # names come from file paths, which may hold `[...]`: never markup
+        name = escape(f["name"])
+        biggest = max(f["callees"], key=lambda r: r["after"] - r["before"], default=None)
         if f["delta"] > 0:
             head = "new" if f["is_new"] else _fmt_pct(f["pct"])
             detail = f"[red]{head} operations[/]  ([dim]{f['lines_before']:,} → {f['lines_after']:,}[/])"
         else:
             # flagged for its call pattern, not its own operation count; name
             # the growth, since other callees may have shrunk in the same change
-            added = max(r["after"] - r["before"] for r in f["callees"])
+            assert biggest is not None  # flagged for a callee, so it has one
+            added = biggest["after"] - biggest["before"]
             detail = f"[red]+{added:,} calls to other functions[/]  [dim](same code, more work)[/]"
-        c.print(f"\n[bold red]⚠[/]  [bold]{f['name']}[/]  {detail}")
+        c.print(f"\n[bold red]⚠[/]  [bold]{name}[/]  {detail}")
 
         # State the rate, not a diagnosis. Whether this is an N+1 or simply more
         # work per call cannot be told apart at one input size, so pyxtrace
         # reports the counts and leaves the reading to the author.
-        if f.get("delegated") and f["callees"] and f["calls_after"]:
-            top = max(f["callees"], key=lambda r: r["after"] - r["before"])
-            per_call = (top["after"] - top["before"]) / f["calls_after"]
+        if f.get("delegated") and biggest and f["calls_after"]:
+            per_call = (biggest["after"] - biggest["before"]) / f["calls_after"]
             c.print(
-                f"   [yellow]{f['name'].split('::')[-1]}() runs {f['calls_after']:,}x[/]"
+                f"   [yellow]{escape(f['name'].split('::')[-1])}() runs {f['calls_after']:,}x[/]"
                 f" and makes [bold]{per_call:,.0f} more call(s) to "
-                f"{top['name'].split('::')[-1]}()[/] each time"
+                f"{escape(biggest['name'].split('::')[-1])}()[/] each time"
             )
 
         if f["callees"]:
             c.print("   [dim]Attributed to:[/]")
             for row in f["callees"][:5]:
                 c.print(
-                    f"     {row['name']}   {row['before']:,} → {row['after']:,} calls"
+                    f"     {escape(row['name'])}   {row['before']:,} → {row['after']:,} calls"
                     f"   [dim]{_fmt_pct(row['pct'])}[/]"
                 )
 
