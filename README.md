@@ -63,6 +63,15 @@ pyxtrace diff HEAD~1 HEAD              # any git ref, or a .pyxt path
 
 `diff` exits **1** when something regressed, so it drops straight into CI.
 
+Before committing, compare your uncommitted work against any commit. A run with
+uncommitted changes is filed separately, so it never overwrites the commit's
+clean run:
+
+```bash
+pyxtrace examples/orders.py            # → .pyxtrace/<sha>-dirty.pyxt
+pyxtrace diff main                     # main vs. the checkout as it is now
+```
+
 ### What a caught regression looks like
 
 The bundled example has a batched customer lookup. Set `PYXTRACE_NPLUSONE=1` and
@@ -74,15 +83,17 @@ it fetches each order's customer individually instead:
    Attributed to:
      orders.py::fetch_customer   0 → 120 calls   new
 
-⚠  orders.py::execute  +5,950% operations  (6 → 363)
+⚠  orders.py::Cursor.execute  +5,950% operations  (6 → 363)
 
 ⚠  orders.py::fetch_customer  new operations  (0 → 240)
+   Attributed to:
+     orders.py::Cursor.execute   0 → 120 calls   new
 
 ✗ FAIL — 3 function(s) regressed
 ```
 
 `process_order` ranks first: it is where the extra work was introduced.
-`execute` and `fetch_customer` merely run more often as a consequence.
+`Cursor.execute` and `fetch_customer` merely run more often as a consequence.
 
 Every line there is arithmetic over exact counts, and there is no confidence
 score because there is nothing to be uncertain about. Note also what it does
@@ -129,18 +140,42 @@ the head and diffs them by name:
 ```
 
 Because the counts are exact, the base run can be recorded once and cached
-(`actions/cache` on `.pyxtrace/`) instead of re-run per PR; the same commit
-always produces the same bytes.
+(`actions/cache` on `.pyxtrace/`) instead of re-run per PR: the same commit on
+the same Python version always produces the same bytes. Put the Python version
+in the cache key — see *Limits*.
 
 ## Options
 
 | Command | What it does |
 |---|---|
 | `pyxtrace run SCRIPT` | Profile → `.pyxtrace/<commit sha>.pyxt` (`run` is optional; `-o` overrides) |
-| `pyxtrace diff BASE HEAD` | Compare two commits (or `.pyxt` paths); exit 1 on regression |
+| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
 | `--root DIR` | Profile this directory instead of the script's own, for an installed or out-of-tree package |
+| `--version` | Print the installed version |
+
+`diff` exits **0** on a pass, **1** on a regression, and **2** on a usage error
+or an unreadable run file. `run` exits with the script's own status; a script
+that fails records nothing, since a partial count is not a baseline.
+
+## What keeps the counts exact
+
+Determinism is the whole product, so these are handled rather than documented
+away:
+
+- **String hashing.** Python randomises it per process, which reorders every
+  `set` and `dict` of strings and changes how many lines a loop over one runs.
+  The `pyxtrace` command re-launches itself with `PYTHONHASHSEED=0`. The Python
+  API cannot, and warns instead.
+- **Threads.** Every thread counts into its own counters, merged at the end, so
+  no update is lost even on free-threaded Python. Threads the script leaves
+  running are waited for exactly as `python app.py` waits for them. Daemon
+  threads still running at exit are reported, since their counts are partial.
+- **Names.** Functions are keyed by qualified name (`Cursor.execute`), so two
+  classes' `__init__` never merge into one entry. On Python 3.10, which has no
+  qualified names on code objects, same-named functions in one file share an
+  entry.
 
 ## Overhead
 
@@ -172,9 +207,17 @@ Stated plainly, because a profiler that hides these is worse than none:
 - **Subprocesses are not traced.** Threads and `asyncio` are: coroutines run on
   the event loop's thread, and worker threads are covered via
   `threading.settrace`. A thread started before tracing begins is not.
+- **The workload has to be deterministic itself.** Unseeded `random`, the
+  clock, or network responses that steer control flow will move the counts.
+  Seed them in the benchmark script.
 - **Only code under one root directory** is profiled — the script's own
   directory by default, or `--root DIR`. Anything outside it is skipped, and a
   run that captured nothing but the entry script says so.
+- **Counts are exact per Python minor version, not across them.** The
+  interpreter decides which lines emit events, and that changes between
+  releases: 3.12 inlined comprehensions, so upgrading from 3.11 moves line
+  counts with no code change. Record both sides of a diff on the same Python;
+  each run file records its interpreter and `diff` warns when they differ.
 - **Operation counts are a proxy for cost, not a measure of it.** An algorithmic
   change can cut operations and still be slower. Gate on counts, then confirm
   with a real timer.

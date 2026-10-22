@@ -7,9 +7,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
-from pyxtrace.run import top
+from pyxtrace.run import only_entry_script, top
 
 
 # ───────────────────────────── run summary ───────────────────────────
@@ -19,12 +20,13 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
     functions = run.get("functions", {})
     if not functions:
         c.print(
-            "[yellow]No functions traced.[/] Only code under the script's own "
-            "directory is profiled — check that the script is where you expect."
+            "[yellow]No functions traced.[/] Only code under the trace root is "
+            "profiled — the script's own directory, or --root. Check that it "
+            "contains the script or the code you mean to measure."
         )
         return
 
-    tbl = Table(title=f"pyxTrace – {run.get('script', '')}", title_style="bold blue")
+    tbl = Table(title=f"pyxTrace – {escape(run.get('script', ''))}", title_style="bold blue")
     tbl.add_column("function", style="cyan", no_wrap=False)
     tbl.add_column("calls", justify="right", style="green")
     tbl.add_column("lines", justify="right", style="magenta")
@@ -32,7 +34,7 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
 
     for name, s in top(run, 10):
         tbl.add_row(
-            name,
+            escape(name),
             f"{s['calls']:,}",
             f"{s['lines']:,}",
             f"{s.get('own_time', 0.0) * 1e3:.1f}",
@@ -46,14 +48,14 @@ def render_run(run: dict, path: str | Path | None = None, console: Console | Non
     # The entry script is always traced, so the "no functions" case above never
     # fires for the common real failure: an installed or out-of-tree library
     # sits outside the script's directory and is filtered out silently.
-    if {name.split("::", 1)[0] for name in functions} <= {run.get("script", "")}:
+    if only_entry_script(run):
         c.print(
             "[yellow]Note: only the entry script was traced.[/] If the code you "
             "care about lives elsewhere — in site-packages or another directory — "
             "pass --root <dir>, or a baseline saved from this run will never see it."
         )
     if path:
-        c.print(f"[dim]run saved to {path}[/]")
+        c.print(f"[dim]run saved to {escape(str(path))}[/]")
 
 
 def _fmt_pct(pct: float | None) -> str:
@@ -62,6 +64,16 @@ def _fmt_pct(pct: float | None) -> str:
     if pct == float("inf"):
         return "new"
     return f"{pct:+,.0f}%"
+
+
+def render_interpreter_mismatch(versions: str, console: Console | None = None) -> None:
+    """Warn before a diff whose two runs came from different Python versions."""
+    c = console or Console()
+    c.print(
+        f"[bold yellow]⚠  Different Python versions: {versions}[/]\n"
+        "   Line counts shift between minor versions, so findings below may come from\n"
+        "   the interpreter rather than your code. Record both runs on the same Python."
+    )
 
 
 def render_diff(findings: list, *, threshold: float, console: Console | None = None) -> None:
@@ -73,32 +85,36 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
         return
 
     for f in findings:
+        # names come from file paths, which may hold `[...]`: never markup
+        name = escape(f["name"])
+        biggest = max(f["callees"], key=lambda r: r["after"] - r["before"], default=None)
         if f["delta"] > 0:
             head = "new" if f["is_new"] else _fmt_pct(f["pct"])
             detail = f"[red]{head} operations[/]  ([dim]{f['lines_before']:,} → {f['lines_after']:,}[/])"
         else:
-            # flagged for its call pattern, not its own operation count
-            added = sum(r["after"] - r["before"] for r in f["callees"])
+            # flagged for its call pattern, not its own operation count; name
+            # the growth, since other callees may have shrunk in the same change
+            assert biggest is not None  # flagged for a callee, so it has one
+            added = biggest["after"] - biggest["before"]
             detail = f"[red]+{added:,} calls to other functions[/]  [dim](same code, more work)[/]"
-        c.print(f"\n[bold red]⚠[/]  [bold]{f['name']}[/]  {detail}")
+        c.print(f"\n[bold red]⚠[/]  [bold]{name}[/]  {detail}")
 
         # State the rate, not a diagnosis. Whether this is an N+1 or simply more
         # work per call cannot be told apart at one input size, so pyxtrace
         # reports the counts and leaves the reading to the author.
-        if f.get("delegated") and f["callees"] and f["calls_after"]:
-            top = max(f["callees"], key=lambda r: r["after"] - r["before"])
-            per_call = (top["after"] - top["before"]) / f["calls_after"]
+        if f.get("delegated") and biggest and f["calls_after"]:
+            per_call = (biggest["after"] - biggest["before"]) / f["calls_after"]
             c.print(
-                f"   [yellow]{f['name'].split('::')[-1]}() runs {f['calls_after']:,}x[/]"
+                f"   [yellow]{escape(f['name'].split('::')[-1])}() runs {f['calls_after']:,}x[/]"
                 f" and makes [bold]{per_call:,.0f} more call(s) to "
-                f"{top['name'].split('::')[-1]}()[/] each time"
+                f"{escape(biggest['name'].split('::')[-1])}()[/] each time"
             )
 
         if f["callees"]:
             c.print("   [dim]Attributed to:[/]")
             for row in f["callees"][:5]:
                 c.print(
-                    f"     {row['name']}   {row['before']:,} → {row['after']:,} calls"
+                    f"     {escape(row['name'])}   {row['before']:,} → {row['after']:,} calls"
                     f"   [dim]{_fmt_pct(row['pct'])}[/]"
                 )
 

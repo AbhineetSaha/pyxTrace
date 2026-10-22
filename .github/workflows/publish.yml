@@ -20,7 +20,14 @@ jobs:
       - id: v
         run: |
           version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          if curl -sf "https://pypi.org/pypi/pyxtrace/$version/json" >/dev/null; then new=false; else new=true; fi
+          # 404 means not published; anything else but 200 is PyPI being unreachable,
+          # which must stop the job rather than look like a version to upload
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/pyxtrace/$version/json")
+          case "$code" in
+            200) new=false ;;
+            404) new=true ;;
+            *) echo "::error::PyPI answered HTTP $code; cannot tell whether $version is published"; exit 1 ;;
+          esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "new=$new" >> "$GITHUB_OUTPUT"
           echo "pyxtrace $version — $([ $new = true ] && echo 'not on PyPI, publish needs approval' || echo 'already on PyPI, nothing to do')"
@@ -38,6 +45,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - name: Tests must pass on the commit being released
+        run: |
+          pip install -e . pytest
+          pytest -q
       - run: pip install build && python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
       - name: Tag and create the GitHub release
