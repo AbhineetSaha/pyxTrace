@@ -101,6 +101,13 @@ any function (an import, a constant, a class attribute) or to a non-Python
 file can reach any test, so it runs every file, and says why. `--all-tests`
 always runs every file.
 
+A stress test can cost more traced time than the rest of the suite together
+(on sqlglot, one test is 82% of all counted lines). A test that makes more than
+5,000,000 calls (`--max-test-calls`) stops being counted and runs on untraced;
+it is named in the report and not compared, so a regression that only it would
+show is missed, never silently. The largest test on jinja makes 324,000 calls,
+on rich 55,000.
+
 ### With a workload script
 
 Record a run per commit, then compare commits:
@@ -234,6 +241,7 @@ in the cache key — see *Limits*.
 | `--fail-on-test-failure` | With the test suite: fail when a test fails on the head |
 | `--stability-runs N` | With the test suite: run the head's tests N times and leave out, and name, tests whose counts differ (default 1) |
 | `--all-tests` | With the test suite: run every test file on the head, not only those that ran the changed code |
+| `--max-test-calls N` | With the test suite: stop counting a test after N calls and name it instead of comparing it (default 5,000,000; 0 for no limit) |
 | `-j N`, `--jobs N` | With the test suite: test files run at once, each in its own process (default: one per CPU) |
 | `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |

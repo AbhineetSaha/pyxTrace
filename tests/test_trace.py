@@ -259,3 +259,31 @@ def test_diff_warns_when_runs_come_from_different_pythons(tmp_path: Path, capsys
 def test_run_records_the_interpreter(tmp_path: Path) -> None:
     core.TraceSession(EXAMPLE, out=tmp_path / "run.pyxt").run()
     assert runfile.load(tmp_path / "run.pyxt")["python"] == runfile.interpreter()
+
+
+def _leaf() -> int:
+    return 1
+
+
+def _busy() -> int:
+    return sum(_leaf() for _ in range(100))
+
+
+def test_settrace_stops_counting_past_max_calls() -> None:
+    """A stress test must not cost its full traced time: past the limit,
+    nothing is counted, not even lines of frames already being traced."""
+    import sys
+
+    from pyxtrace.bytecode import ProfileTracer
+
+    t = ProfileTracer(root_path=Path(__file__).parent, max_calls=10)
+    sys.settrace(t)
+    try:
+        assert _busy() == 100
+    finally:
+        sys.settrace(None)
+    assert t.capped
+    stats = t.stats
+    assert sum(s["calls"] for s in stats.values()) == 10
+    # _busy's own loop stopped reporting lines once the limit was hit
+    assert sum(s["lines"] for s in stats.values()) < 50

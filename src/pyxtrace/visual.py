@@ -130,8 +130,9 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
 
 def render_auto_header(before: str, after: str, compared: int, head_only: int,
-                       failed: list[str], unstable: list[str], files_run: int = 0,
-                       files_total: int = 0, console: Console | None = None) -> None:
+                       failed: list[str], unstable: list[str], capped: list[str],
+                       max_calls: int, files_run: int = 0, files_total: int = 0,
+                       console: Console | None = None) -> None:
     """Say what an automatic diff compared, and what it left out, before its findings."""
     c = console or Console()
     c.print(f"[dim]Compared {escape(before)} → {escape(after)} on {compared:,} test(s) "
@@ -152,6 +153,11 @@ def render_auto_header(before: str, after: str, compared: int, head_only: int,
         c.print(f"[yellow]⚠  {len(unstable):,} test(s) counted differently from one run of "
                 f"{escape(after)} to the next and were not compared:[/]")
         _names(c, unstable)
+    if capped:
+        c.print(f"[yellow]⚠  {len(capped):,} test(s) made more than {max_calls:,} calls and were "
+                "not counted, so a regression only they show is missed "
+                "(--max-test-calls):[/]")
+        _names(c, capped)
 
 
 def _names(c: Console, names: list[str], shown: int = 10) -> None:

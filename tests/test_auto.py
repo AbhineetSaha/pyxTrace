@@ -494,6 +494,15 @@ def test_code_outside_functions_is_told_from_comments_and_docstrings() -> None:
         assert _outside_functions(src, {line}), line
 
 
+def test_a_test_past_the_call_limit_is_named_not_compared(repo: Path) -> None:
+    _commit(repo, "regress", {"src/shop/orders.py": _regress(ORDERS)})
+    r = _diff(repo, "main", "HEAD", "--max-test-calls", "50")
+    # the regression is only in a test too large to count: missed, but never silently
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test(s) made more than 50 calls and were not counted" in r.stdout
+    assert "tests/test_orders.py::test_handle_request" in r.stdout
+
+
 def test_a_test_whose_counts_move_between_runs_is_left_out(repo: Path, tmp_path: Path) -> None:
     # does more work every time it runs, as a test driven by the clock can
     runs = tmp_path / "runs"

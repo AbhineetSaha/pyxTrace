@@ -53,6 +53,7 @@ class AutoResult:
     files_total: int = 0                               # of all the suite's test files
     failed: list[str] = field(default_factory=list)   # failed on the head, not compared
     unstable: list[str] = field(default_factory=list)  # counts moved between head runs
+    capped: list[str] = field(default_factory=list)    # over max_calls on a side: not counted
     changed: set[str] = field(default_factory=set)    # "file::qualname" changed in the diff
     new: set[str] = field(default_factory=set)        # changed, and not in the base at all
     uncovered: list[str] = field(default_factory=list)  # changed, and no passing test ran it
@@ -327,7 +328,7 @@ def _collect(tree: Path, label: str, scratch: Path) -> tuple[list[str], list[str
 
 
 def _run_files(tree: Path, label: str, files: list[str], config: list[str], scratch: Path,
-               jobs: int, runs: int = 1) -> Dict[str, Dict[str, Any]]:
+               jobs: int, max_calls: int, runs: int = 1) -> Dict[str, Dict[str, Any]]:
     """Each test file's results, from a pytest process of its own, *runs* times over.
 
     A test's counts depend on what ran before it in the same process: caches
@@ -341,7 +342,8 @@ def _run_files(tree: Path, label: str, files: list[str], config: list[str], scra
 
     def one(i: int, f: str) -> Dict[str, Any]:
         out = scratch / f"{tree.name}-{i}.json"
-        return _pytest(tree, label, [*config, f], out, PYXTRACE_PYTEST_OUT=str(out))
+        return _pytest(tree, label, [*config, f], out, PYXTRACE_PYTEST_OUT=str(out),
+                       PYXTRACE_MAX_CALLS=str(max_calls))
 
     by_file: Dict[str, list[Dict[str, Any]]] = {f: [] for f in files}
     with ThreadPoolExecutor(jobs) as pool:
@@ -356,8 +358,10 @@ def _settle(runs: list[Dict[str, Any]]) -> Dict[str, Any]:
     first, *rest = runs
     failed = sorted(set().union(*(r["failed"] for r in runs)))
     passed = {t: c for t, c in first["passed"].items() if all(r["passed"].get(t) == c for r in rest)}
-    unstable = sorted(set(first["passed"]) - set(passed) - set(failed))
-    return {"passed": passed, "failed": failed, "unstable": unstable}
+    capped = sorted(set().union(*(r["capped"] for r in runs)) - set(failed))
+    passed = {t: c for t, c in passed.items() if t not in capped}
+    unstable = sorted(set(first["passed"]) - set(passed) - set(failed) - set(capped))
+    return {"passed": passed, "failed": failed, "unstable": unstable, "capped": capped}
 
 
 # ─────────────────────── base results, kept per file ─────────────────────── #
@@ -377,7 +381,7 @@ def _bytes(path: Path) -> bytes:
 
 
 def _cache_keys(tree: Path, sha: str, files: list[str], test_paths: list[str],
-                cache: Path) -> Dict[str, Path]:
+                max_calls: int, cache: Path) -> Dict[str, Path]:
     """Where each test file's results on commit *sha* are kept.
 
     A file's results are a pure function of what the key hashes: the commit's
@@ -389,7 +393,7 @@ def _cache_keys(tree: Path, sha: str, files: list[str], test_paths: list[str],
     # shortcut: a test module importing another test module is not in its key;
     # hash every test file into every key if that turns up
     shared = _sha(
-        sys.version, sys.platform, _tracer(), str(FORMAT_VERSION),
+        sys.version, sys.platform, _tracer(), str(FORMAT_VERSION), str(max_calls),
         *sorted(f"{d.metadata['Name']}=={d.version}" for d in importlib.metadata.distributions()),
         *(_bytes(p) for p in sorted(Path(__file__).parent.glob("*.py"))),
         sha,
@@ -419,9 +423,10 @@ def _store(path: Path, result: Dict[str, Any]) -> None:
 def _reaches(result: Dict[str, Any], changed: set[str]) -> bool:
     """Can a change to *changed* move this file's counts, judging by its run on the base?
 
-    A test that failed there ran an unknown part of itself, so it might.
+    A test that failed there, or was too large to count, ran something
+    unknown, so it might.
     """
-    return bool(result["failed"]) or any(
+    return bool(result["failed"] or result["capped"]) or any(
         fn["calls"] and is_changed(name, changed)
         for fns in result["passed"].values() for name, fn in fns.items())
 
@@ -453,7 +458,7 @@ def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
 
 def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
               jobs: int | None = None, stability_runs: int = 1,
-              all_tests: bool = False) -> AutoResult:
+              all_tests: bool = False, max_calls: int = 0) -> AutoResult:
     """Compare *before* and *after* (default: the working tree) by running the tests.
 
     With *use_merge_base*, the base is where the two diverged, as for a pull
@@ -509,14 +514,16 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
 
         files, config = _collect(trees["head"], after_label, scratch)
         jobs = jobs or os.cpu_count() or 1
-        keys = _cache_keys(trees["base"], base, files, test_paths, top / ".pyxtrace" / "tests")
+        keys = _cache_keys(trees["base"], base, files, test_paths, max_calls,
+                           top / ".pyxtrace" / "tests")
         base_results = {f: r for f in files if (r := _load(keys[f])) is not None}
         missing = [f for f in files if f not in base_results]
         if base_results:
             _say(f"{len(base_results)} of {len(files)} test file(s) on {before_label} "
                  "counted before, reusing them")
         if missing:
-            fresh = _run_files(trees["base"], before_label, missing, config, scratch, jobs)
+            fresh = _run_files(trees["base"], before_label, missing, config, scratch, jobs,
+                               max_calls)
             for f, r in fresh.items():
                 base_results[f] = r
                 _store(keys[f], r)
@@ -531,13 +538,17 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
             _say(f"{len(selected)} of {len(files)} test file(s) run code this change touches; "
                  "running only those (--all-tests runs every one)")
         head_results = _run_files(trees["head"], after_label, selected, config, scratch, jobs,
-                                  runs=stability_runs) if selected else {}
+                                  max_calls, runs=stability_runs) if selected else {}
         b_tests = {t: c for r in base_results.values() for t, c in r["passed"].items()}
         a_tests = {t: c for r in head_results.values() for t, c in r["passed"].items()}
         failed = sorted(t for r in head_results.values() for t in r["failed"])
         unstable = sorted(t for r in head_results.values() for t in r["unstable"])
+        # too large on either side: a test that grew past the limit is one of them
+        capped = sorted({t for f in selected for r in (base_results[f], head_results[f])
+                         for t in r["capped"]})
         common = sorted(set(b_tests) & set(a_tests))
-        if not common and selected == files:  # with fewer files run, this can be fine
+        # with fewer files run, or tests too large to count, this can be fine
+        if not common and selected == files and not capped:
             raise AutoDiffError(
                 "no test passed on both commits, so there is nothing to compare. "
                 "Fix the failing tests, or record runs with `pyxtrace run SCRIPT`"
@@ -566,6 +577,6 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         before=b_run, after=a_run, before_label=before_label, after_label=after_label,
         tests_compared=len(common), head_only=len(set(a_tests) - set(b_tests)),
         files_run=len(selected), files_total=len(files),
-        failed=failed, unstable=unstable, changed=changed, new=new,
+        failed=failed, unstable=unstable, capped=capped, changed=changed, new=new,
         uncovered=sorted(changed - anywhere), unbaselined=sorted(anywhere - compared),
     )

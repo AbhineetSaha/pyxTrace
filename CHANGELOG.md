@@ -64,7 +64,13 @@
   only when one of its tests ran a changed function on the base, or failed
   there. A change outside any function (an import, a module constant, a class
   attribute), to a non-Python file, or a deleted module runs every file and
-  says why. `--all-tests` runs every file. The report says how many ran.
+  says why; prose, `.github/` and a version bump in `pyproject.toml` do not.
+  `--all-tests` runs every file. The report says how many ran.
+- **`--max-test-calls N`** (default 5,000,000): a test that makes more calls
+  stops being counted and runs on untraced, and is named in the report rather
+  than compared. On sqlglot one stress test makes 70M calls; with the limit,
+  its test file traces in 41 s instead of 227 s (17 s untraced). The
+  largest test on jinja makes 324,000 calls, on rich 55,000.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

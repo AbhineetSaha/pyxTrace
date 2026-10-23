@@ -101,6 +101,10 @@ def _parser() -> argparse.ArgumentParser:
     d.add_argument("--all-tests", action="store_true",
                    help="when running the tests, run every test file on AFTER, not only those "
                         "whose tests ran the changed code on BEFORE")
+    d.add_argument("--max-test-calls", type=_non_negative(int), default=5_000_000, metavar="N",
+                   help="when running the tests, stop counting a test after N function calls "
+                        "and leave it out, naming it; stress tests otherwise dominate the "
+                        "traced time (default 5,000,000; 0: no limit)")
     return p
 
 
@@ -221,11 +225,12 @@ def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     try:
         # a pull request is compared from where it branched off, by default
         r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False, jobs=a.jobs,
-                      stability_runs=a.stability_runs, all_tests=a.all_tests)
+                      stability_runs=a.stability_runs, all_tests=a.all_tests,
+                      max_calls=a.max_test_calls)
     except AutoDiffError as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
     render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed,
-                       r.unstable, r.files_run, r.files_total)
+                       r.unstable, r.capped, a.max_test_calls, r.files_run, r.files_total)
     findings = diff(r.before, r.after, threshold=a.threshold, min_ops=a.min_ops)
     notes = {}
     for f in findings:
