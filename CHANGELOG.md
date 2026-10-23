@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Contributor guide, code of conduct, security policy, and issue and pull
+  request templates.
+
 ## 3.0.0
 
 A hardening release: every change below fixes a way the gate could give a wrong

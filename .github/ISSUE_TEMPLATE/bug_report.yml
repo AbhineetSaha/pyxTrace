@@ -1,0 +1,43 @@
+name: Bug report
+description: pyxtrace crashed, gave a wrong result, or behaved differently from the docs
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got instead.
+      placeholder: |
+        Ran `pyxtrace diff main HEAD` and it passed, but `process_order` clearly does more work now...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The smallest script and commands that show the problem. Attaching the two .pyxt files helps a lot.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pyxtrace version
+      description: Output of `pyxtrace --version`
+      placeholder: pyxtrace 3.0.0
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      description: Mention it if you're on a free-threaded build (3.13t, 3.14t).
+      placeholder: Python 3.12.3, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Full output
+      description: Paste the complete terminal output, including any traceback.
+      render: text
