@@ -76,9 +76,14 @@ def render_interpreter_mismatch(versions: str, console: Console | None = None) -
     )
 
 
-def render_diff(findings: list, *, threshold: float, console: Console | None = None) -> None:
-    """Print the regression report.  Empty findings → a clean PASS."""
+def render_diff(findings: list, *, threshold: float, console: Console | None = None,
+                notes: dict[str, str] | None = None) -> None:
+    """Print the regression report.  Empty findings → a clean PASS.
+
+    *notes* maps a function name to one line printed under its finding.
+    """
     c = console or Console()
+    notes = notes or {}
 
     if not findings:
         c.print(f"[green]✓ PASS[/] — no function grew by more than {threshold:g}%")
@@ -98,6 +103,8 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
             added = biggest["after"] - biggest["before"]
             detail = f"[red]+{added:,} calls to other functions[/]  [dim](same code, more work)[/]"
         c.print(f"\n[bold red]⚠[/]  [bold]{name}[/]  {detail}")
+        if f["name"] in notes:
+            c.print(f"   [bold yellow]{escape(notes[f['name']])}[/]")
 
         # State the rate, not a diagnosis. Whether this is an N+1 or simply more
         # work per call cannot be told apart at one input size, so pyxtrace
@@ -120,3 +127,26 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
     c.print(f"\n[bold red]✗ FAIL[/] — {len(findings)} function(s) regressed")
 
+
+
+def render_auto_header(before: str, after: str, compared: int, left_out: int,
+                       console: Console | None = None) -> None:
+    """Say what an automatic diff compared, before its findings."""
+    c = console or Console()
+    c.print(f"[dim]Compared {escape(before)} → {escape(after)} on {compared:,} test(s) "
+            "that passed on both[/]")
+    if left_out:
+        c.print(f"[dim]{left_out:,} test(s) passed on only one side and were left out[/]")
+
+
+def render_uncovered(uncovered: list[str], console: Console | None = None) -> None:
+    """Changed functions that no compared test ran: the gate cannot see them."""
+    if not uncovered:
+        return
+    c = console or Console()
+    c.print(f"\n[yellow]⚠  {len(uncovered)} changed function(s) were not run by any test, "
+            "so they were not checked:[/]")
+    for name in uncovered[:10]:
+        c.print(f"     {escape(name)}")
+    if len(uncovered) > 10:
+        c.print(f"     [dim]… and {len(uncovered) - 10} more[/]")

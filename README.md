@@ -55,6 +55,41 @@ One dependency (`rich`). Python 3.10+.
 
 ## Use
 
+### With your test suite: nothing to set up
+
+```bash
+pip install pyxtrace
+pyxtrace diff main HEAD                # or `pyxtrace diff main` for uncommitted work
+```
+
+With no runs recorded, `diff` uses your pytest suite as the workload. It checks
+out both commits into temporary git worktrees (your checkout is never touched),
+runs the head's tests against both versions of the code, and counts each test
+on its own. Only tests that passed on both sides are compared, so a test for a
+feature the base does not have yet is left out rather than reported.
+
+Each regression is then tied to the diff. A function the change edited is
+marked `← changed in this diff`; one that only got busier names the changed
+functions on its call path. Changed functions that no test ran are listed too,
+because the gate cannot see them:
+
+```
+⚠  src/shop/orders.py::process_order  +120 calls to other functions  (same code, more work)
+   ← on the call path of changed: src/shop/orders.py::handle_request
+   process_order() runs 120x and makes 1 more call(s) to fetch_customer() each time
+
+✗ FAIL — 3 function(s) regressed
+
+⚠  1 changed function(s) were not run by any test, so they were not checked:
+     src/shop/orders.py::refund
+```
+
+Only each test's own body is counted, not fixtures or imports. Tracing makes
+tests roughly 9x slower (see *Overhead*), and pytest-xdist is not supported,
+so on a large suite a workload script is the faster gate.
+
+### With a workload script
+
 Record a run per commit, then compare commits:
 
 ```bash
@@ -127,8 +162,18 @@ it is shown for orientation and is never what `diff` gates on.
 
 ## In CI
 
-Run files are keyed by commit sha, so a PR gate records the base commit and
-the head and diffs them by name:
+With a test suite, the gate is one step after installing your project's test
+dependencies:
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }                  # the base commit has to be present
+- run: pip install pyxtrace pytest -e .
+- run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD
+```
+
+With a workload script, run files are keyed by commit sha, so a PR gate records
+the base commit and the head and diffs them by name:
 
 ```yaml
 - uses: actions/checkout@v4
@@ -152,7 +197,7 @@ in the cache key — see *Limits*.
 | Command | What it does |
 |---|---|
 | `pyxtrace run SCRIPT` | Profile → `.pyxtrace/<commit sha>.pyxt` (`run` is optional; `-o` overrides) |
-| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout |
+| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout. With no runs recorded, runs the pytest suite on both |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
 | `--root DIR` | Profile this directory instead of the script's own, for an installed or out-of-tree package |

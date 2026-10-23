@@ -6,6 +6,7 @@ pyxTrace command-line interface
     pyxtrace diff main HEAD                # regression gate, exits 1 on failure
     pyxtrace diff a.pyxt b.pyxt            # explicit run files work too
     pyxtrace diff main                     # main vs. the checkout as it is now
+                                           # (no runs recorded? the tests are run)
     pyxtrace run app.py -- --epochs 10     # args after `--` go to the script
 
 Exit status: 0 pass, 1 regression found (or the traced script failed),
@@ -23,14 +24,21 @@ from typing import NoReturn
 
 import pyxtrace
 from pyxtrace import core
+from pyxtrace.auto import AutoDiffError, auto_diff, is_changed, related_changes
 from pyxtrace.run import (
+    commit_sha,
     current_run,
     diff,
     interpreter_mismatch,
     load,
     path_for,
 )
-from pyxtrace.visual import render_diff, render_interpreter_mismatch
+from pyxtrace.visual import (
+    render_auto_header,
+    render_diff,
+    render_interpreter_mismatch,
+    render_uncovered,
+)
 
 _COMMANDS = ("run", "diff")
 
@@ -155,7 +163,43 @@ def _original_args(a: argparse.Namespace, script_args: list[str]) -> list[str]:
     return args + (["--", *script_args] if script_args else [])
 
 
+def _no_runs(a: argparse.Namespace) -> bool:
+    """Are both sides commits with no run recorded for at least one of them?"""
+    refs = [a.before] + ([a.after] if a.after else [])
+    if any(Path(r).is_file() or commit_sha(r) is None for r in refs):
+        return False
+    try:
+        path_for(a.before)
+        after = path_for(a.after) if a.after else current_run()
+    except FileNotFoundError:
+        return True
+    return not after.is_file()
+
+
+def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
+    """No runs recorded: run the test suite on both sides and compare that."""
+    try:
+        r = auto_diff(a.before, a.after)
+    except AutoDiffError as e:
+        p.exit(2, f"pyxtrace: error: {e}\n")
+    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.tests_left_out)
+    findings = diff(r.before, r.after, threshold=a.threshold, min_ops=a.min_ops)
+    notes = {}
+    for f in findings:
+        if is_changed(f["name"], r.changed):
+            notes[f["name"]] = "← changed in this diff"
+        else:
+            related = related_changes(f["name"], r.after, r.changed)
+            if related:
+                notes[f["name"]] = "← on the call path of changed: " + ", ".join(related)
+    render_diff(findings, threshold=a.threshold, notes=notes)
+    render_uncovered(r.uncovered)
+    sys.exit(1 if findings else 0)
+
+
 def _diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
+    if _no_runs(a):
+        _auto_diff(p, a)
     try:
         before = path_for(a.before)
         after = path_for(a.after) if a.after else current_run()
