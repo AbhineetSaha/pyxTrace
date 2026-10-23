@@ -85,6 +85,7 @@ def repo(tmp_path: Path) -> Path:
     _git(r, "config", "user.email", "t@example.com")
     _git(r, "config", "user.name", "t")
     _commit(r, "base", {
+        ".gitignore": ".pyxtrace/\n",
         "src/shop/__init__.py": "",
         "src/shop/orders.py": ORDERS,
         "tests/test_orders.py": TEST,
@@ -374,6 +375,44 @@ def test_the_test_only_flags_are_refused_for_recorded_runs(repo: Path, tmp_path:
     r = _diff(repo, str(run), str(run), "--require-covered")
     assert r.returncode == 2
     assert "apply when diff runs your tests" in r.stderr
+
+
+REFUND_TEST = '''\
+from shop.orders import refund
+
+
+def test_refund():
+    assert refund(2) == 3.0
+'''
+
+
+def test_the_base_is_counted_once_per_test_file(repo: Path) -> None:
+    _commit(repo, "regress", {"src/shop/orders.py": _regress(ORDERS),
+                              "tests/test_refund.py": REFUND_TEST})
+    first = _diff(repo, "main", "HEAD")
+    assert "running 2 test file(s) on main" in first.stderr
+    cache = repo / ".pyxtrace" / "tests"
+    entries = {p.name: p.read_bytes() for p in cache.glob("*.json")}
+    assert len(entries) == 2
+
+    again = _diff(repo, "main", "HEAD")
+    assert "2 of 2 test file(s) on main" in again.stderr
+    assert "test file(s) on main" not in again.stderr.replace("2 of 2 test file(s) on main", "")
+    assert again.returncode == first.returncode == 1
+    assert again.stdout == first.stdout
+
+    # what was kept is what a fresh count gives, byte for byte
+    for p in cache.glob("*.json"):
+        p.unlink()
+    _diff(repo, "main", "HEAD")
+    assert {p.name: p.read_bytes() for p in cache.glob("*.json")} == entries
+
+    # a changed test file is counted again on the base; the other one is not
+    _commit(repo, "more refunds", {"tests/test_refund.py": REFUND_TEST + (
+        "\n\ndef test_refund_zero():\n    assert refund(0) == 0\n")})
+    r = _diff(repo, "main", "HEAD")
+    assert "1 of 2 test file(s) on main" in r.stderr
+    assert "running 1 test file(s) on main" in r.stderr
 
 
 def test_a_test_whose_counts_move_between_runs_is_left_out(repo: Path, tmp_path: Path) -> None:

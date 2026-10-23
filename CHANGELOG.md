@@ -52,6 +52,13 @@
   unchanged `main` against itself with `--stability-runs 2` all passed, each
   leaving out 2 to 4 such tests (`test_live_empty` every time). The CI recipe
   in the README now uses it.
+- **The base side is counted once per test file and kept.** Results go to
+  `.pyxtrace/tests/`, keyed by a hash of the base commit, the test file, every
+  conftest and test helper, the Python version, the tracer, the installed
+  packages and pyxTrace itself. A second diff against the same base runs only
+  the head (rich: 10.5 s → 6.0 s), and editing one test file counts only that
+  file again. A kept entry is byte-identical to a fresh count. The README's CI
+  recipe caches the directory.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

@@ -91,9 +91,9 @@ do, so there is no baseline yet:
 
 `--require-covered` turns that last warning into a failure.
 
-Only each test's own body is counted, not fixtures or imports. Both commits'
-suites run, each traced (see *Overhead*), and pytest-xdist is not supported, so
-on a large suite a workload script is the faster gate.
+Only each test's own body is counted, not fixtures or imports. Each test file
+runs in its own pytest process, several at once, so a test's counts never depend
+on which other files ran before it; pytest-xdist itself is not used.
 
 ### With a workload script
 
@@ -177,8 +177,21 @@ dependencies:
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }                  # the base commit has to be present
 - run: pip install pyxtrace pytest -e .
+- uses: actions/cache@v4                    # the base side, counted once per test file
+  with:
+    path: .pyxtrace/tests
+    key: pyxtrace-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+    restore-keys: pyxtrace-${{ runner.os }}-
 - run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD --stability-runs 2
 ```
+
+The base side's results are kept in `.pyxtrace/tests/`, one entry per test file,
+named by a hash of everything the counts depend on: the base commit, that test
+file, every conftest and test helper, the Python version, the installed
+packages and pyxTrace itself. A second diff against the same base runs only the
+head; a pull request that edits one test file counts only that file again on the
+base. An entry can never be reused for anything it does not match, so restoring
+an older cache is safe.
 
 `--stability-runs 2` runs the head's tests twice and leaves out any test whose
 counts differ between the two, so a test driven by the clock cannot fail the

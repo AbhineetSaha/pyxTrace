@@ -15,6 +15,8 @@ traces back to.
 from __future__ import annotations
 
 import ast
+import hashlib
+import importlib.metadata
 import json
 import os
 import re
@@ -290,6 +292,62 @@ def _settle(runs: list[Dict[str, Any]]) -> Dict[str, Any]:
     return {"passed": passed, "failed": failed, "unstable": unstable}
 
 
+# ─────────────────────── base results, kept per file ─────────────────────── #
+def _sha(*parts: str | bytes) -> str:
+    h = hashlib.sha256()
+    for p in parts:
+        b = p if isinstance(p, bytes) else p.encode()
+        h.update(len(b).to_bytes(8, "big") + b)  # length first: no two lists hash alike
+    return h.hexdigest()
+
+
+def _bytes(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError:
+        return b""
+
+
+def _cache_keys(tree: Path, sha: str, files: list[str], test_paths: list[str],
+                cache: Path) -> Dict[str, Path]:
+    """Where each test file's results on commit *sha* are kept.
+
+    A file's results are a pure function of what the key hashes: the commit's
+    code, the file, every test helper and conftest beside it, and the
+    interpreter, tracer, installed packages and pyxTrace that counted it.
+    Anything else that changes them would make the cache give wrong answers,
+    so the key errs toward too much.
+    """
+    # shortcut: a test module importing another test module is not in its key;
+    # hash every test file into every key if that turns up
+    shared = _sha(
+        sys.version, sys.platform, _tracer(), str(FORMAT_VERSION),
+        *sorted(f"{d.metadata['Name']}=={d.version}" for d in importlib.metadata.distributions()),
+        *(_bytes(p) for p in sorted(Path(__file__).parent.glob("*.py"))),
+        sha,
+        *(part for p in test_paths if p not in files for part in (p, _bytes(tree / p))),
+    )
+    return {f: cache / f"{_sha(shared, f, _bytes(tree / f))}.json" for f in files}
+
+
+def _load(path: Path) -> Dict[str, Any] | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _store(path: Path, result: Dict[str, Any]) -> None:
+    # shortcut: entries are never deleted; prune .pyxtrace/tests by age if it grows
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)  # a reader never sees half a file
+    except OSError as e:
+        _say(f"⚠ could not keep results in {path.parent} ({e.strerror or e}); counting again next time")
+
+
 def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     """Add per-test counts up into one run's functions."""
     total: Dict[str, Dict[str, Any]] = {}
@@ -348,6 +406,7 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
                  f"compare against the tip of {before} instead")
             base, before_label = fork, f"merge-base of {before} ({fork[:7]})"
 
+    top = Path(_git_ok("rev-parse", "--show-toplevel").strip())
     scratch = Path(tempfile.mkdtemp(prefix="pyxtrace-"))
     trees = {"base": scratch / "base", "head": scratch / "head"}
     try:
@@ -355,7 +414,6 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
             _git_ok("worktree", "add", "--detach", "--quiet", str(trees[name]), sha)
         new_files = _untracked() if after is None else []
         if new_files:
-            top = Path(_git_ok("rev-parse", "--show-toplevel").strip())
             for path in new_files:
                 dest = trees["head"] / path
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -364,15 +422,25 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
 
         # the head's tests run on both sides, so only the code under test differs
         tracked = _git_ok("-C", str(trees["head"]), "ls-files").splitlines()
-        for path in tracked + new_files:
-            if is_test_path(path):
-                dest = trees["base"] / path
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(trees["head"] / path, dest)
+        test_paths = sorted(p for p in tracked + new_files if is_test_path(p))
+        for path in test_paths:
+            dest = trees["base"] / path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(trees["head"] / path, dest)
 
         files, config = _collect(trees["head"], after_label, scratch)
         jobs = jobs or os.cpu_count() or 1
-        base_results = _run_files(trees["base"], before_label, files, config, scratch, jobs)
+        keys = _cache_keys(trees["base"], base, files, test_paths, top / ".pyxtrace" / "tests")
+        base_results = {f: r for f in files if (r := _load(keys[f])) is not None}
+        missing = [f for f in files if f not in base_results]
+        if base_results:
+            _say(f"{len(base_results)} of {len(files)} test file(s) on {before_label} "
+                 "counted before, reusing them")
+        if missing:
+            fresh = _run_files(trees["base"], before_label, missing, config, scratch, jobs)
+            for f, r in fresh.items():
+                base_results[f] = r
+                _store(keys[f], r)
         head_results = _run_files(trees["head"], after_label, files, config, scratch, jobs,
                                   runs=stability_runs)
         b_tests = {t: c for r in base_results.values() for t, c in r["passed"].items()}
