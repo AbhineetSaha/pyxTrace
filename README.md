@@ -1,6 +1,9 @@
 <div align="center">
 
-<h1>PyxTrace</h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AbhineetSaha/pyxTrace/main/docs/logo/logo-dark.svg">
+  <img alt="pyxtrace" src="https://raw.githubusercontent.com/AbhineetSaha/pyxTrace/main/docs/logo/logo-light.svg" width="380">
+</picture>
 
 <p><em>Catch Python performance regressions in CI — deterministically,<br/>so your benchmark gate stops crying wolf.</em></p>
 

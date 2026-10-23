@@ -52,7 +52,7 @@ class ProfileTracer:
     Keeps per-function totals in memory instead of writing a record per event,
     and is serialised once when the run ends.  ``calls`` and ``lines`` are
     exactly reproducible across runs; ``own_time`` is not, and is for display
-    only.  See PYXTRACE_PRODUCT_STRATEGY.md §9.
+    only.
 
     ``callees`` records how many times each function called each other
     function, which is what attributes a regression to the call that caused it.
