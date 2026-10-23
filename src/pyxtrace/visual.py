@@ -130,7 +130,8 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
 
 def render_auto_header(before: str, after: str, compared: int, head_only: int,
-                       failed: list[str], console: Console | None = None) -> None:
+                       failed: list[str], unstable: list[str],
+                       console: Console | None = None) -> None:
     """Say what an automatic diff compared, and what it left out, before its findings."""
     c = console or Console()
     c.print(f"[dim]Compared {escape(before)} → {escape(after)} on {compared:,} test(s) "
@@ -144,6 +145,10 @@ def render_auto_header(before: str, after: str, compared: int, head_only: int,
         c.print(f"[yellow]⚠  {len(failed):,} test(s) failed on {escape(after)} and were not "
                 "compared (--fail-on-test-failure makes this fail the gate):[/]")
         _names(c, failed)
+    if unstable:
+        c.print(f"[yellow]⚠  {len(unstable):,} test(s) counted differently from one run of "
+                f"{escape(after)} to the next and were not compared:[/]")
+        _names(c, unstable)
 
 
 def _names(c: Console, names: list[str], shown: int = 10) -> None:

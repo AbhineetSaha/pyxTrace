@@ -177,8 +177,12 @@ dependencies:
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }                  # the base commit has to be present
 - run: pip install pyxtrace pytest -e .
-- run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD
+- run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD --stability-runs 2
 ```
+
+`--stability-runs 2` runs the head's tests twice and leaves out any test whose
+counts differ between the two, so a test driven by the clock cannot fail the
+gate. It lists those tests, and costs one more run of the head.
 
 With a workload script, run files are keyed by commit sha, so a PR gate records
 the base commit and the head and diffs them by name:
@@ -209,6 +213,8 @@ in the cache key — see *Limits*.
 | `pyxtrace diff BASE...HEAD` / `BASE..HEAD` | As in git: from where the two diverged, or from `BASE` itself |
 | `--require-covered` | With the test suite: fail when a changed function is run by no test |
 | `--fail-on-test-failure` | With the test suite: fail when a test fails on the head |
+| `--stability-runs N` | With the test suite: run the head's tests N times and leave out, and name, tests whose counts differ (default 1) |
+| `-j N`, `--jobs N` | With the test suite: test files run at once, each in its own process (default: one per CPU) |
 | `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
@@ -240,7 +246,7 @@ away:
   random generators (NumPy, Faker), and work driven by the clock or by timer
   threads. On rich, 1 to 3 of 948 tests still move between runs by under
   0.1%, because log lines carry the time and a live display refreshes on a
-  timer.
+  timer. `--stability-runs 2` finds such tests and leaves them out.
 - **Names.** Functions are keyed by qualified name (`Cursor.execute`), so two
   classes' `__init__` never merge into one entry. Python 3.10 has no qualified
   names on code objects, so pyxTrace reads them from the source instead.

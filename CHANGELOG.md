@@ -46,6 +46,12 @@
   each side of a diff took 6 s → 2.7 s on jinja and 6 s → 4.2 s on rich
   (8 cores). `-j 1` runs one file at a time, for tests that cannot run side
   by side.
+- **`--stability-runs N`** runs the head's test files N times and leaves out
+  any test whose counts differ between runs, naming it, so a test driven by
+  the clock or a timer thread cannot fail the gate. Three diffs of rich's
+  unchanged `main` against itself with `--stability-runs 2` all passed, each
+  leaving out 2 to 4 such tests (`test_live_empty` every time). The CI recipe
+  in the README now uses it.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

@@ -48,6 +48,7 @@ class AutoResult:
     tests_compared: int
     head_only: int = 0                                 # passed on the head only: new or fixed
     failed: list[str] = field(default_factory=list)   # failed on the head, not compared
+    unstable: list[str] = field(default_factory=list)  # counts moved between head runs
     changed: set[str] = field(default_factory=set)    # "file::qualname" changed in the diff
     new: set[str] = field(default_factory=set)        # changed, and not in the base at all
     uncovered: list[str] = field(default_factory=list)  # changed, and no passing test ran it
@@ -256,8 +257,8 @@ def _collect(tree: Path, label: str, scratch: Path) -> tuple[list[str], list[str
 
 
 def _run_files(tree: Path, label: str, files: list[str], config: list[str], scratch: Path,
-               jobs: int) -> Dict[str, Dict[str, Any]]:
-    """Each test file's results, from a pytest process of its own.
+               jobs: int, runs: int = 1) -> Dict[str, Dict[str, Any]]:
+    """Each test file's results, from a pytest process of its own, *runs* times over.
 
     A test's counts depend on what ran before it in the same process: caches
     it finds warm, modules already imported. Measured on rich, 298 of 947
@@ -265,14 +266,28 @@ def _run_files(tree: Path, label: str, files: list[str], config: list[str], scra
     keeps a file's counts the same whatever else is run, and the files run in
     parallel.
     """
-    _say(f"➜ running {len(files)} test file(s) on {label}")
+    _say(f"➜ running {len(files)} test file(s) on {label}" + f", {runs} times" * (runs > 1))
+    tasks = [f for _ in range(runs) for f in files]
 
     def one(i: int, f: str) -> Dict[str, Any]:
         out = scratch / f"{tree.name}-{i}.json"
         return _pytest(tree, label, [*config, f], out, PYXTRACE_PYTEST_OUT=str(out))
 
+    by_file: Dict[str, list[Dict[str, Any]]] = {f: [] for f in files}
     with ThreadPoolExecutor(jobs) as pool:
-        return dict(zip(files, pool.map(one, range(len(files)), files), strict=True))
+        for f, r in zip(tasks, pool.map(one, range(len(tasks)), tasks), strict=True):
+            by_file[f].append(r)
+    return {f: _settle(rs) for f, rs in by_file.items()}
+
+
+def _settle(runs: list[Dict[str, Any]]) -> Dict[str, Any]:
+    """One file's result from repeated runs: a test whose counts moved between them is
+    unstable, and comparing it would report noise as a regression."""
+    first, *rest = runs
+    failed = sorted(set().union(*(r["failed"] for r in runs)))
+    passed = {t: c for t, c in first["passed"].items() if all(r["passed"].get(t) == c for r in rest)}
+    unstable = sorted(set(first["passed"]) - set(passed) - set(failed))
+    return {"passed": passed, "failed": failed, "unstable": unstable}
 
 
 def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -301,7 +316,7 @@ def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
 
 
 def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
-              jobs: int | None = None) -> AutoResult:
+              jobs: int | None = None, stability_runs: int = 1) -> AutoResult:
     """Compare *before* and *after* (default: the working tree) by running the tests.
 
     With *use_merge_base*, the base is where the two diverged, as for a pull
@@ -358,10 +373,12 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         files, config = _collect(trees["head"], after_label, scratch)
         jobs = jobs or os.cpu_count() or 1
         base_results = _run_files(trees["base"], before_label, files, config, scratch, jobs)
-        head_results = _run_files(trees["head"], after_label, files, config, scratch, jobs)
+        head_results = _run_files(trees["head"], after_label, files, config, scratch, jobs,
+                                  runs=stability_runs)
         b_tests = {t: c for r in base_results.values() for t, c in r["passed"].items()}
         a_tests = {t: c for r in head_results.values() for t, c in r["passed"].items()}
         failed = sorted(t for r in head_results.values() for t in r["failed"])
+        unstable = sorted(t for r in head_results.values() for t in r["unstable"])
         common = sorted(set(b_tests) & set(a_tests))
         if not common:
             raise AutoDiffError(
@@ -392,6 +409,6 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
     return AutoResult(
         before=b_run, after=a_run, before_label=before_label, after_label=after_label,
         tests_compared=len(common), head_only=len(set(a_tests) - set(b_tests)),
-        failed=failed, changed=changed, new=new,
+        failed=failed, unstable=unstable, changed=changed, new=new,
         uncovered=sorted(changed - anywhere), unbaselined=sorted(anywhere - compared),
     )

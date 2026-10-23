@@ -376,6 +376,32 @@ def test_the_test_only_flags_are_refused_for_recorded_runs(repo: Path, tmp_path:
     assert "apply when diff runs your tests" in r.stderr
 
 
+def test_a_test_whose_counts_move_between_runs_is_left_out(repo: Path, tmp_path: Path) -> None:
+    # does more work every time it runs, as a test driven by the clock can
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _commit(repo, "unstable test", {"tests/test_unstable.py": f'''\
+        import os
+
+        def test_unstable():
+            n = 1
+            while True:  # claim the next number; the head's runs are parallel
+                try:
+                    os.close(os.open(os.path.join({str(runs)!r}, str(n)), os.O_CREAT | os.O_EXCL))
+                    break
+                except FileExistsError:
+                    n += 1
+            assert sum(1 for _ in range(n * 100)) > 0
+        '''})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 1, r.stdout + r.stderr  # the noise, read as a regression
+    r = _diff(repo, "main", "HEAD", "--stability-runs", "2")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test(s) counted differently from one run of HEAD" in r.stdout
+    assert "tests/test_unstable.py::test_unstable" in r.stdout
+    assert "on 1 test(s)" in r.stdout  # test_handle_request is still compared
+
+
 def test_unseeded_random_does_not_move_a_tests_counts(tmp_path: Path) -> None:
     """Measured on jinja: tests using unseeded `random` moved by up to 18% from
     one run to the next, enough to fail the gate on a change that did nothing."""

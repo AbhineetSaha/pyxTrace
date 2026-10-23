@@ -95,6 +95,9 @@ def _parser() -> argparse.ArgumentParser:
     d.add_argument("-j", "--jobs", type=_non_negative(int), default=0,
                    help="when running the tests, how many test files to run at once "
                         "(default: one per CPU; 1 if your tests cannot run side by side)")
+    d.add_argument("--stability-runs", type=int, choices=range(1, 11), default=1, metavar="N",
+                   help="when running the tests, run AFTER's N times and leave out tests "
+                        "whose counts differ between runs (default 1; 2 for a CI gate)")
     return p
 
 
@@ -214,10 +217,12 @@ def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     """No runs recorded: run the test suite on both sides and compare that."""
     try:
         # a pull request is compared from where it branched off, by default
-        r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False, jobs=a.jobs)
+        r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False, jobs=a.jobs,
+                      stability_runs=a.stability_runs)
     except AutoDiffError as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
-    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed)
+    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed,
+                       r.unstable)
     findings = diff(r.before, r.after, threshold=a.threshold, min_ops=a.min_ops)
     notes = {}
     for f in findings:
