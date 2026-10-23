@@ -10,8 +10,10 @@ the tests that passed on both commits.
 
 from __future__ import annotations
 
+import gc
 import json
 import os
+import random
 import sys
 import threading
 from pathlib import Path
@@ -19,14 +21,28 @@ from typing import Any, Dict
 
 import pytest
 
+from pyxtrace import monitor
 from pyxtrace.bytecode import ProfileTracer
 from pyxtrace.run import to_dict
 
 _OUT = os.environ.get("PYXTRACE_PYTEST_OUT")
 _ROOT = Path(os.environ.get("PYXTRACE_PYTEST_ROOT", ".")).resolve()
+# both sides of a diff run in the same interpreter, so they pick the same tracer
+_TRACER = os.environ.get("PYXTRACE_TRACER") or (
+    monitor.NAME if monitor.available() else "settrace")
 
 _counts: Dict[str, Dict[str, Any]] = {}
 _passed: set[str] = set()
+_failed: set[str] = set()
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    if _OUT:
+        # unseeded `random` changed a test's counts from run to run (measured:
+        # jinja's lorem ipsum tests, by up to 18%). Both sides get the same seed,
+        # and each test the same one whatever ran before it.
+        random.seed(0)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -34,6 +50,41 @@ def pytest_runtest_call(item):
     if not _OUT:
         yield
         return
+    # no collection inside the test, where it would run at an allocation count
+    # that depends on earlier tests and land their finalizers in this one's
+    # counts. (Collecting before each test as well costs 5x on jinja's suite.)
+    gc_was_on = gc.isenabled()
+    gc.disable()
+    try:
+        if _TRACER == monitor.NAME:
+            stats = yield from _with_monitoring()
+        else:
+            stats = yield from _with_settrace()
+    finally:
+        if gc_was_on:
+            gc.enable()
+    _counts[item.nodeid] = to_dict(stats, root=_ROOT, script="pytest", tracer=_TRACER)["functions"]
+
+
+def _with_monitoring():
+    # process-wide: covers every thread without per-thread hooks
+    tracer = monitor.MonitorTracer(root_path=_ROOT)
+    try:
+        tracer.start()
+    except ValueError as e:
+        # falling back to settrace here would compare counts from two tracers
+        raise pytest.UsageError(
+            f"pyxtrace cannot count with sys.monitoring ({e}); another profiler holds "
+            "its slot. Set PYXTRACE_TRACER=settrace to use the slower tracer"
+        ) from None
+    try:
+        yield
+    finally:
+        tracer.stop()
+    return tracer.stats
+
+
+def _with_settrace():
     tracer = ProfileTracer(root_path=_ROOT)
     prev_trace, prev_thread_trace = sys.gettrace(), threading.gettrace()
     sys.settrace(tracer)
@@ -43,17 +94,28 @@ def pytest_runtest_call(item):
     finally:
         sys.settrace(prev_trace)
         threading.settrace(prev_thread_trace)  # type: ignore[arg-type]
-    _counts[item.nodeid] = to_dict(tracer.stats, root=_ROOT, script="pytest")["functions"]
+    return tracer.stats
 
 
 def pytest_runtest_logreport(report):
     if report.when == "call" and report.passed:
         _passed.add(report.nodeid)
+    elif report.failed:  # in setup, the test itself, or teardown
+        _failed.add(report.nodeid)
+
+
+def pytest_collectreport(report):
+    if report.failed:  # a test module that does not even import
+        _failed.add(report.nodeid)
 
 
 def pytest_sessionfinish(session):
     if not _OUT:
         return
-    # a failed test's counts stop wherever it failed: not comparable
-    data = {nodeid: fns for nodeid, fns in _counts.items() if nodeid in _passed}
+    # a failed test's counts stop wherever it failed: not comparable. A test
+    # that passed its call but failed in teardown is failed too.
+    data = {
+        "passed": {n: fns for n, fns in _counts.items() if n in _passed and n not in _failed},
+        "failed": sorted(_failed),
+    }
     Path(_OUT).write_text(json.dumps(data, sort_keys=True), encoding="utf-8")

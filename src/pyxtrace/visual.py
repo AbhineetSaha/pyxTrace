@@ -129,24 +129,53 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
 
 
-def render_auto_header(before: str, after: str, compared: int, left_out: int,
-                       console: Console | None = None) -> None:
-    """Say what an automatic diff compared, before its findings."""
+def render_auto_header(before: str, after: str, compared: int, head_only: int,
+                       failed: list[str], console: Console | None = None) -> None:
+    """Say what an automatic diff compared, and what it left out, before its findings."""
     c = console or Console()
     c.print(f"[dim]Compared {escape(before)} → {escape(after)} on {compared:,} test(s) "
             "that passed on both[/]")
-    if left_out:
-        c.print(f"[dim]{left_out:,} test(s) passed on only one side and were left out[/]")
+    if head_only:
+        c.print(f"[dim]{head_only:,} test(s) pass only on {escape(after)} (new, or fixed by "
+                "this change) and have no baseline to compare with[/]")
+    if failed:
+        # pyxtrace is not the test runner, but a failing test it skips silently
+        # reads as "checked"
+        c.print(f"[yellow]⚠  {len(failed):,} test(s) failed on {escape(after)} and were not "
+                "compared (--fail-on-test-failure makes this fail the gate):[/]")
+        _names(c, failed)
 
 
-def render_uncovered(uncovered: list[str], console: Console | None = None) -> None:
-    """Changed functions that no compared test ran: the gate cannot see them."""
-    if not uncovered:
+def _names(c: Console, names: list[str], shown: int = 10) -> None:
+    for name in names[:shown]:
+        c.print(f"     {escape(name)}")
+    if len(names) > shown:
+        c.print(f"     [dim]… and {len(names) - shown} more[/]")
+
+
+def render_uncovered(uncovered: list[str], unbaselined: list[str], new: set[str],
+                     changed: int, console: Console | None = None) -> None:
+    """Changed functions the gate could not compare, and why."""
+    if not changed:
         return
     c = console or Console()
-    c.print(f"\n[yellow]⚠  {len(uncovered)} changed function(s) were not run by any test, "
-            "so they were not checked:[/]")
-    for name in uncovered[:10]:
-        c.print(f"     {escape(name)}")
-    if len(uncovered) > 10:
-        c.print(f"     [dim]… and {len(uncovered) - 10} more[/]")
+    measured = changed - len(uncovered) - len(unbaselined)
+    c.print(f"\n[dim]{measured} of {changed} changed function(s) were compared[/]")
+    old = [n for n in uncovered if n not in new]
+    fresh = [n for n in uncovered if n in new]
+    if old:
+        c.print(f"[yellow]⚠  {len(old)} changed function(s) no test runs, so the gate "
+                "cannot see them:[/]")
+        _names(c, old)
+    if fresh:
+        c.print(f"[yellow]⚠  {len(fresh)} new function(s) no test runs yet:[/]")
+        _names(c, fresh)
+    if unbaselined:
+        c.print(f"[dim]{len(unbaselined)} changed function(s) are run only by tests new in this "
+                "change, so there is no baseline yet; they are compared from the next change:[/]")
+        _names(c, unbaselined)
+
+
+def render_gate_failure(reason: str, console: Console | None = None) -> None:
+    """A reason the gate fails other than a regression, from an opt-in check."""
+    (console or Console()).print(f"[bold red]✗ FAIL[/] — {escape(reason)}")

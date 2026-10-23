@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -130,7 +131,10 @@ def test_a_test_for_code_the_base_lacks_is_left_out(repo: Path) -> None:
     })
     r = _diff(repo, "main", "HEAD")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "1 test(s) passed on only one side and were left out" in r.stdout
+    assert "1 test(s) pass only on HEAD" in r.stdout
+    # the new function is run by that test, which has no baseline: not "uncovered"
+    assert "new function(s) no test runs" not in r.stdout
+    assert "run only by tests new in this change" in r.stdout
 
 
 def test_changed_code_no_test_runs_is_named(repo: Path) -> None:
@@ -138,8 +142,9 @@ def test_changed_code_no_test_runs_is_named(repo: Path) -> None:
         "return order_id * 1.5", "return round(order_id * 1.5, 2)")})
     r = _diff(repo, "main", "HEAD")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "not run by any test" in r.stdout
+    assert "1 changed function(s) no test runs, so the gate cannot see them" in r.stdout
     assert "src/shop/orders.py::refund" in r.stdout
+    assert "0 of 1 changed function(s) were compared" in r.stdout
 
 
 def test_uncommitted_changes_are_compared_and_left_alone(repo: Path) -> None:
@@ -225,3 +230,170 @@ def test_related_changes_walks_callers_and_callees() -> None:
 ])
 def test_test_files_are_recognised(path: str, expected: bool) -> None:
     assert is_test_path(path) is expected
+
+
+# ─────────────────────────── which commits ────────────────────────── #
+def _branch_behind_a_fix(repo: Path) -> None:
+    """main gets a fix after `feature` branched off it; feature changes nothing."""
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, "slow", {"src/shop/orders.py": _regress(ORDERS)})
+    _git(repo, "checkout", "-qB", "feature")
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, "fast again", {"src/shop/orders.py": ORDERS})
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "comment only", {"src/shop/orders.py": _regress(ORDERS) + "# a comment\n"})
+
+
+def test_a_branch_is_compared_from_where_it_diverged(repo: Path) -> None:
+    # main's later fix is not part of this change; against main's tip it would
+    # read as this change undoing it
+    _branch_behind_a_fix(repo)
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 commit(s) this change does not include" in r.stderr
+    assert "merge-base of main" in r.stdout
+
+
+def test_a_three_dot_range_is_the_same_as_the_default(repo: Path) -> None:
+    _branch_behind_a_fix(repo)
+    r = _diff(repo, "main...HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "merge-base of main" in r.stdout
+
+
+def test_a_two_dot_range_or_the_flag_compares_against_the_tip(repo: Path) -> None:
+    _branch_behind_a_fix(repo)
+    for refs in (["main..HEAD"], ["main", "HEAD", "--no-merge-base"]):
+        r = _diff(repo, *refs)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "merge-base" not in r.stdout
+
+
+def test_a_range_and_the_flag_cannot_disagree(repo: Path) -> None:
+    r = _diff(repo, "main...HEAD", "--no-merge-base")
+    assert r.returncode == 2
+    assert "contradicts" in r.stderr
+
+
+def test_a_missing_local_branch_suggests_the_remote_one(repo: Path) -> None:
+    # CI checkouts usually have origin/main and no local main
+    _git(repo, "update-ref", "refs/remotes/origin/release", "HEAD")
+    r = _diff(repo, "release", "HEAD")
+    assert r.returncode == 2
+    assert "did you mean origin/release?" in r.stderr
+
+
+def test_ranges_pick_the_recorded_runs_too(repo: Path) -> None:
+    _branch_behind_a_fix(repo)
+    # untracked, so recording does not mark the runs as uncommitted work
+    (repo / "bench.py").write_text(
+        "import pathlib, sys\n"
+        "sys.path.insert(0, str(pathlib.Path(__file__).parent / 'src'))\n"
+        "from shop.orders import Cursor, handle_request\n"
+        "handle_request(Cursor())\n"
+    )
+    env = {**os.environ, "PYTHONHASHSEED": "0"}
+    fork = subprocess.run(["git", "merge-base", "main", "HEAD"], cwd=repo,
+                          capture_output=True, text=True).stdout.strip()
+    for ref in (fork, "main", "feature"):
+        _git(repo, "checkout", "-q", ref)
+        subprocess.run([sys.executable, "-m", "pyxtrace", "run", "bench.py"],
+                       cwd=repo, env=env, check=True, capture_output=True)
+    assert _diff(repo, "main...feature").returncode == 0
+    assert _diff(repo, "main..feature").returncode == 1
+
+
+def test_a_shallow_clone_says_why_the_base_is_missing(repo: Path, tmp_path: Path) -> None:
+    _commit(repo, "second", {"src/shop/orders.py": ORDERS + "# a comment\n"})
+    first = subprocess.run(["git", "rev-parse", "HEAD~1"], cwd=repo,
+                           capture_output=True, text=True).stdout.strip()
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "feature",
+                    repo.as_uri(), str(clone)], check=True, capture_output=True)
+    r = _diff(clone, first, "HEAD")
+    assert r.returncode == 2
+    assert "shallow clone" in r.stderr
+
+
+def test_an_untracked_module_is_part_of_the_working_tree(repo: Path) -> None:
+    # not yet `git add`ed: `git stash create` alone would leave it out, and the
+    # head side would fail to import it
+    _write(repo, {
+        "src/shop/lookup.py": "def lookup(cur, cid):\n"
+                              "    cur.execute('one', cid)\n"
+                              "    return {'id': cid}\n",
+        "src/shop/orders.py": _regress(ORDERS).replace(
+            "def fetch_customer(cur, cid):\n",
+            "def fetch_customer(cur, cid):\n    from shop.lookup import lookup\n"
+            "    lookup(cur, cid)\n"),
+    })
+    r = _diff(repo, "main")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 untracked file(s)" in r.stderr
+    assert "src/shop/lookup.py::lookup" in r.stdout
+
+
+# ─────────────────────────── what was left out ─────────────────────── #
+BROKEN_TEST = '''\
+def test_broken():
+    assert 1 == 2
+'''
+
+
+def test_a_test_failing_on_head_is_named_and_only_fails_the_gate_on_request(repo: Path) -> None:
+    _commit(repo, "a failing test", {"tests/test_broken.py": BROKEN_TEST})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test(s) failed on HEAD" in r.stdout
+    assert "tests/test_broken.py::test_broken" in r.stdout
+    r = _diff(repo, "main", "HEAD", "--fail-on-test-failure")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 test(s) failed (--fail-on-test-failure)" in r.stdout
+
+
+def test_require_covered_fails_on_changed_code_no_test_runs(repo: Path) -> None:
+    _commit(repo, "refund", {"src/shop/orders.py": ORDERS.replace(
+        "return order_id * 1.5", "return round(order_id * 1.5, 2)")})
+    r = _diff(repo, "main", "HEAD", "--require-covered")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "no test runs (--require-covered)" in r.stdout
+
+
+def test_a_new_function_no_test_runs_is_listed_as_new(repo: Path) -> None:
+    _commit(repo, "untested feature", {
+        "src/shop/orders.py": ORDERS + "\n\ndef discount(total):\n    return total * 0.9\n"})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 new function(s) no test runs yet" in r.stdout
+    assert "cannot see them" not in r.stdout
+
+
+def test_the_test_only_flags_are_refused_for_recorded_runs(repo: Path, tmp_path: Path) -> None:
+    run = tmp_path / "a.pyxt"
+    run.write_text('{"pyxtrace": 3, "functions": {}}')
+    r = _diff(repo, str(run), str(run), "--require-covered")
+    assert r.returncode == 2
+    assert "apply when diff runs your tests" in r.stderr
+
+
+def test_unseeded_random_does_not_move_a_tests_counts(tmp_path: Path) -> None:
+    """Measured on jinja: tests using unseeded `random` moved by up to 18% from
+    one run to the next, enough to fail the gate on a change that did nothing."""
+    (tmp_path / "test_rand.py").write_text(
+        "import random\n\n"
+        "def work():\n"
+        "    return sum(1 for _ in range(random.randint(1, 10_000)))\n\n"
+        "def test_work():\n"
+        "    assert work() > 0\n"
+    )
+    outs = []
+    for i in range(2):
+        out = tmp_path / f"out{i}.json"
+        env = {**os.environ, "PYTHONHASHSEED": "0", "PYXTRACE_PYTEST_OUT": str(out),
+               "PYXTRACE_PYTEST_ROOT": str(tmp_path)}
+        subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "pyxtrace.pytest_plugin",
+                        "-p", "no:cacheprovider", "-p", "no:randomly", str(tmp_path)],
+                       cwd=tmp_path, env=env, check=True, capture_output=True)
+        fns = json.loads(out.read_text())["passed"]["test_rand.py::test_work"]
+        outs.append({name: (f["calls"], f["lines"]) for name, f in fns.items()})
+    assert outs[0] == outs[1]

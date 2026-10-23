@@ -66,12 +66,16 @@ With no runs recorded, `diff` uses your pytest suite as the workload. It checks
 out both commits into temporary git worktrees (your checkout is never touched),
 runs the head's tests against both versions of the code, and counts each test
 on its own. Only tests that passed on both sides are compared, so a test for a
-feature the base does not have yet is left out rather than reported.
+feature the base does not have yet is left out rather than reported. Tests that
+fail on the head are named, not silently dropped; pyxTrace is not your test
+runner, so run pytest as its own CI job as well (or pass
+`--fail-on-test-failure`).
 
 Each regression is then tied to the diff. A function the change edited is
 marked `← changed in this diff`; one that only got busier names the changed
-functions on its call path. Changed functions that no test ran are listed too,
-because the gate cannot see them:
+functions on its call path. Changed functions the gate could not compare are
+listed too, split by why: no test runs them, or only tests new in this change
+do, so there is no baseline yet:
 
 ```
 ⚠  src/shop/orders.py::process_order  +120 calls to other functions  (same code, more work)
@@ -80,13 +84,16 @@ because the gate cannot see them:
 
 ✗ FAIL — 3 function(s) regressed
 
-⚠  1 changed function(s) were not run by any test, so they were not checked:
+1 of 2 changed function(s) were compared
+⚠  1 changed function(s) no test runs, so the gate cannot see them:
      src/shop/orders.py::refund
 ```
 
-Only each test's own body is counted, not fixtures or imports. Tracing makes
-tests roughly 9x slower (see *Overhead*), and pytest-xdist is not supported,
-so on a large suite a workload script is the faster gate.
+`--require-covered` turns that last warning into a failure.
+
+Only each test's own body is counted, not fixtures or imports. Both commits'
+suites run, each traced (see *Overhead*), and pytest-xdist is not supported, so
+on a large suite a workload script is the faster gate.
 
 ### With a workload script
 
@@ -116,16 +123,16 @@ The bundled example has a batched customer lookup. Set `PYXTRACE_NPLUSONE=1` and
 it fetches each order's customer individually instead:
 
 ```
-⚠  orders.py::process_order  +120 calls to other functions  (same code, more work)
+⚠  examples/orders.py::process_order  +120 calls to other functions  (same code, more work)
    process_order() runs 120x and makes 1 more call(s) to fetch_customer() each time
    Attributed to:
-     orders.py::fetch_customer   0 → 120 calls   new
+     examples/orders.py::fetch_customer   0 → 120 calls   new
 
-⚠  orders.py::Cursor.execute  +5,950% operations  (6 → 363)
+⚠  examples/orders.py::Cursor.execute  +5,950% operations  (6 → 363)
 
-⚠  orders.py::fetch_customer  new operations  (0 → 240)
+⚠  examples/orders.py::fetch_customer  new operations  (0 → 240)
    Attributed to:
-     orders.py::Cursor.execute   0 → 120 calls   new
+     examples/orders.py::Cursor.execute   0 → 120 calls   new
 
 ✗ FAIL — 3 function(s) regressed
 ```
@@ -147,14 +154,15 @@ pyxtrace examples/orders.py
 ```
 
 ```
-                pyxTrace – orders.py
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┓
-┃ function                   ┃ calls ┃ lines ┃ own ms ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━┩
-│ orders.py::process_order   │   120 │   360 │    0.2 │
-│ orders.py::handle_request  │     1 │   245 │    0.1 │
-│ orders.py::fetch_orders    │     1 │   122 │    0.0 │
-└────────────────────────────┴───────┴───────┴────────┘
+                 pyxTrace – examples/orders.py
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┓
+┃ function                            ┃ calls ┃ lines ┃ own ms ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━┩
+│ examples/orders.py::serialize       │   120 │   480 │    0.2 │
+│ examples/orders.py::process_order   │   120 │   360 │    0.2 │
+│ examples/orders.py::handle_request  │     1 │   245 │    0.1 │
+│ examples/orders.py::fetch_orders    │     1 │   122 │    0.0 │
+└─────────────────────────────────────┴───────┴───────┴────────┘
 ```
 
 `calls` and `lines` are deterministic. `own ms` is timing and varies run to run —
@@ -197,10 +205,14 @@ in the cache key — see *Limits*.
 | Command | What it does |
 |---|---|
 | `pyxtrace run SCRIPT` | Profile → `.pyxtrace/<commit sha>.pyxt` (`run` is optional; `-o` overrides) |
-| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout. With no runs recorded, runs the pytest suite on both |
+| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout. With no runs recorded, runs the pytest suite on both, starting from where `HEAD` branched off `BASE` |
+| `pyxtrace diff BASE...HEAD` / `BASE..HEAD` | As in git: from where the two diverged, or from `BASE` itself |
+| `--require-covered` | With the test suite: fail when a changed function is run by no test |
+| `--fail-on-test-failure` | With the test suite: fail when a test fails on the head |
+| `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
-| `--root DIR` | Profile this directory instead of the script's own, for an installed or out-of-tree package |
+| `--root DIR` | Profile this directory instead of the git checkout the script is in, for an installed or out-of-tree package |
 | `--version` | Print the installed version |
 
 `diff` exits **0** on a pass, **1** on a regression, and **2** on a usage error
@@ -220,10 +232,18 @@ away:
   no update is lost even on free-threaded Python. Threads the script leaves
   running are waited for exactly as `python app.py` waits for them. Daemon
   threads still running at exit are reported, since their counts are partial.
+- **Randomness and garbage collection in tests.** When `diff` runs your test
+  suite, `random` is seeded the same way before every test, and garbage
+  collection is held off while a test runs, so it cannot fire at a point that
+  depends on earlier tests. On jinja that took the tests whose counts moved
+  between identical runs from 5 of 911 to none. Still yours to fix: other
+  random generators (NumPy, Faker), and work driven by the clock or by timer
+  threads. On rich, 1 to 3 of 948 tests still move between runs by under
+  0.1%, because log lines carry the time and a live display refreshes on a
+  timer.
 - **Names.** Functions are keyed by qualified name (`Cursor.execute`), so two
-  classes' `__init__` never merge into one entry. On Python 3.10, which has no
-  qualified names on code objects, same-named functions in one file share an
-  entry.
+  classes' `__init__` never merge into one entry. Python 3.10 has no qualified
+  names on code objects, so pyxTrace reads them from the source instead.
 
 ## Overhead
 
@@ -237,8 +257,22 @@ Measured on `fib(22)`, a deliberately call-heavy worst case
 
 `fib(22)` is a deliberate worst case: it does almost nothing between calls, so
 the per-event cost has nothing to amortise against. The real-code column is
-sqlglot parsing 838 SQL statements, which is the number to plan around. Trace a
-representative benchmark script, not your whole test suite.
+sqlglot parsing 838 SQL statements, which is the number to plan around for a
+workload script.
+
+With your test suite, on Python 3.12+ the counting uses `sys.monitoring`
+(PEP 669), which switches code outside the root off for good instead of
+filtering it on every call. Each side of the diff, measured on whole suites:
+
+| Suite | pytest alone | settrace (3.10, 3.11) | sys.monitoring (3.12+) |
+|---|---|---|---|
+| jinja (911 tests) | 2.5 s | 14.2 s | 10.8 s |
+| rich (948 tests) | 5.2 s | 12.5 s | 9.8 s |
+
+The two tracers count calls differently (settrace counts a generator resuming
+as a call), so a run file records which one made it and runs from different
+tracers are never compared. `PYXTRACE_TRACER=settrace` forces the slower one,
+for example when another profiler already holds `sys.monitoring`.
 
 ## Limits
 
@@ -258,9 +292,11 @@ Stated plainly, because a profiler that hides these is worse than none:
 - **The workload has to be deterministic itself.** Unseeded `random`, the
   clock, or network responses that steer control flow will move the counts.
   Seed them in the benchmark script.
-- **Only code under one root directory** is profiled — the script's own
-  directory by default, or `--root DIR`. Anything outside it is skipped, and a
-  run that captured nothing but the entry script says so.
+- **Only code under one root directory** is profiled — the git checkout the
+  script is in by default (the script's own directory outside git), or
+  `--root DIR`. Anything outside it is skipped, and so is any virtualenv or
+  `site-packages` inside it. A run that captured nothing but the entry script
+  says so.
 - **Counts are exact per Python minor version, not across them.** The
   interpreter decides which lines emit events, and that changes between
   releases: 3.12 inlined comprehensions, so upgrading from 3.11 moves line

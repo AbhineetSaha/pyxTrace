@@ -4,6 +4,7 @@ pyxTrace command-line interface
     pyxtrace run app.py                    # profile → .pyxtrace/<commit sha>.pyxt
     pyxtrace app.py                        # same thing, `run` is implied
     pyxtrace diff main HEAD                # regression gate, exits 1 on failure
+    pyxtrace diff main...HEAD              # git ranges work too
     pyxtrace diff a.pyxt b.pyxt            # explicit run files work too
     pyxtrace diff main                     # main vs. the checkout as it is now
                                            # (no runs recorded? the tests are run)
@@ -31,11 +32,14 @@ from pyxtrace.run import (
     diff,
     interpreter_mismatch,
     load,
+    merge_base,
     path_for,
+    tracer_mismatch,
 )
 from pyxtrace.visual import (
     render_auto_header,
     render_diff,
+    render_gate_failure,
     render_interpreter_mismatch,
     render_uncovered,
 )
@@ -67,11 +71,13 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("-o", "--out", type=Path,
                      help="run file to write (default .pyxtrace/<commit sha>.pyxt)")
     run.add_argument("--root", type=Path,
-                     help="directory to profile (default: the script's own directory); "
-                          "point this at an installed or out-of-tree package to trace it")
+                     help="directory to profile (default: the git checkout the script is in, "
+                          "else the script's own directory; virtualenvs inside it are "
+                          "skipped); point this at an installed package to trace it")
 
     d = sub.add_parser("diff", help="compare two runs and exit 1 on a performance regression")
-    d.add_argument("before", help="commit (main, HEAD, a sha) or .pyxt path")
+    d.add_argument("before", help="commit (main, HEAD, a sha), a range (main...HEAD, "
+                                  "main..HEAD) or .pyxt path")
     d.add_argument("after", nargs="?",
                    help="commit or .pyxt path (default: the current checkout, "
                         "including uncommitted changes)")
@@ -79,6 +85,13 @@ def _parser() -> argparse.ArgumentParser:
                    help="fail if a function grows more than this percent (default 10)")
     d.add_argument("--min-ops", type=_non_negative(int), default=10,
                    help="ignore growth smaller than this many operations (default 10)")
+    d.add_argument("--require-covered", action="store_true",
+                   help="when running the tests, fail if a changed function is run by no test")
+    d.add_argument("--fail-on-test-failure", action="store_true",
+                   help="when running the tests, fail if any test fails on AFTER")
+    d.add_argument("--no-merge-base", dest="merge_base", action="store_false", default=None,
+                   help="when running the tests, compare against the tip of BEFORE rather "
+                        "than where AFTER diverged from it (same as BEFORE..AFTER)")
     return p
 
 
@@ -163,6 +176,24 @@ def _original_args(a: argparse.Namespace, script_args: list[str]) -> list[str]:
     return args + (["--", *script_args] if script_args else [])
 
 
+def _split_range(p: argparse.ArgumentParser, a: argparse.Namespace) -> None:
+    """`A...B` compares from where A and B diverged, `A..B` from A itself, as in git.
+
+    Either side may be left out and means HEAD. Git refuses `..` inside a ref
+    name, so a ref is never misread as a range; a file path can be, and wins.
+    """
+    for sep, use_merge_base in (("...", True), ("..", False)):
+        if a.after and sep in a.after and not Path(a.after).is_file():
+            p.error(f"{a.after}: give a range as one argument, BEFORE{sep}AFTER")
+        if a.after is None and sep in a.before and not Path(a.before).is_file():
+            before, after = a.before.split(sep, 1)
+            a.before, a.after = before or "HEAD", after or "HEAD"
+            if a.merge_base is False and use_merge_base:
+                p.error(f"--no-merge-base contradicts the range {before}{sep}{after}")
+            a.merge_base = use_merge_base
+            return
+
+
 def _no_runs(a: argparse.Namespace) -> bool:
     """Are both sides commits with no run recorded for at least one of them?"""
     refs = [a.before] + ([a.after] if a.after else [])
@@ -179,10 +210,11 @@ def _no_runs(a: argparse.Namespace) -> bool:
 def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     """No runs recorded: run the test suite on both sides and compare that."""
     try:
-        r = auto_diff(a.before, a.after)
+        # a pull request is compared from where it branched off, by default
+        r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False)
     except AutoDiffError as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
-    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.tests_left_out)
+    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed)
     findings = diff(r.before, r.after, threshold=a.threshold, min_ops=a.min_ops)
     notes = {}
     for f in findings:
@@ -193,13 +225,32 @@ def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
             if related:
                 notes[f["name"]] = "← on the call path of changed: " + ", ".join(related)
     render_diff(findings, threshold=a.threshold, notes=notes)
-    render_uncovered(r.uncovered)
-    sys.exit(1 if findings else 0)
+    render_uncovered(r.uncovered, r.unbaselined, r.new, len(r.changed))
+    reasons = []
+    if a.require_covered and r.uncovered:
+        reasons.append(f"{len(r.uncovered)} changed function(s) no test runs (--require-covered)")
+    if a.fail_on_test_failure and r.failed:
+        reasons.append(f"{len(r.failed)} test(s) failed (--fail-on-test-failure)")
+    for reason in reasons:
+        render_gate_failure(reason)
+    sys.exit(1 if findings or reasons else 0)
 
 
 def _diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
+    _split_range(p, a)
     if _no_runs(a):
         _auto_diff(p, a)
+    if a.require_covered or a.fail_on_test_failure:
+        p.error("--require-covered and --fail-on-test-failure apply when diff runs your "
+                "tests, which it does only when no runs are recorded")
+    head = a.after or "HEAD"
+    if a.merge_base and commit_sha(a.before) and commit_sha(head) \
+            and not Path(a.before).is_file() and not Path(head).is_file():
+        # recorded runs are filed by commit, so `A...B` looks up the run of the fork
+        fork = merge_base(a.before, head)
+        if fork is None:
+            p.error(f"{a.before} and {head} share no history")
+        a.before = fork
     try:
         before = path_for(a.before)
         after = path_for(a.after) if a.after else current_run()
@@ -215,6 +266,10 @@ def _diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     except (OSError, ValueError) as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
 
+    tracers = tracer_mismatch(b_run, a_run)
+    if tracers:
+        p.exit(2, f"pyxtrace: error: the runs were counted by different tracers ({tracers}), "
+                  "whose counts differ with no code change; record both with one pyxtrace\n")
     mismatch = interpreter_mismatch(b_run, a_run)
     if mismatch:
         render_interpreter_mismatch(mismatch)

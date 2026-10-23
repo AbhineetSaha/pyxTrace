@@ -17,8 +17,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
 
+from pyxtrace.bytecode import SEP
+from pyxtrace.names import resolve
+
 # 2: functions keyed by qualified name (`Cursor.execute`), script relative to root
-FORMAT_VERSION = 2
+# 3: the default root is the git checkout, so names are relative to its top
+#    (`examples/orders.py::f`); 3.10 runs get qualified names too; `tracer` says
+#    which tracer counted (settrace or monitoring), and the two never compare
+FORMAT_VERSION = 3
 
 # Where `pyxtrace run` files a run when no -o is given: one file per commit, so
 # CI can compare "the base of this PR" against "HEAD" by name.
@@ -98,13 +104,46 @@ def current_run() -> Path:
     return RUN_DIR / run_name(commit_sha(), worktree_dirty())
 
 
+def repo_root(path: Path) -> Path | None:
+    """The top of the git checkout containing *path*; None outside one."""
+    r = _git("-C", str(path), "rev-parse", "--show-toplevel")
+    if r is None or r.returncode != 0 or not r.stdout.strip():
+        return None
+    return Path(r.stdout.strip()).resolve()
+
+
+def merge_base(a: str, b: str) -> str | None:
+    """Where *a* and *b* diverged; None when they share no history."""
+    if a.startswith("-") or b.startswith("-"):  # would be read as options
+        return None
+    r = _git("merge-base", a, b)
+    if r is None or r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def ref_hint(ref: str) -> str:
+    """What to try when *ref* is not a commit here, or "" when there is no better guess.
+
+    CI checkouts usually have no local `main`, only `origin/main`, and a shallow
+    clone has no commits older than its tip at all.
+    """
+    if not ref.startswith("-") and commit_sha(f"origin/{ref}"):
+        return f"; did you mean origin/{ref}?"
+    r = _git("rev-parse", "--is-shallow-repository")
+    if r is not None and r.stdout.strip() == "true":
+        return ("; this is a shallow clone, so older commits are missing "
+                "(fetch the history first; with actions/checkout set fetch-depth: 0)")
+    return ""
+
+
 def path_for(ref: str) -> Path:
     """Resolve a `diff` argument: an existing file, else the run recorded for a commit."""
     if Path(ref).is_file():
         return Path(ref)
     sha = commit_sha(ref)
     if sha is None:
-        raise FileNotFoundError(f"{ref}: not a run file or a git commit")
+        raise FileNotFoundError(f"{ref}: not a run file or a git commit{ref_hint(ref)}")
     path = RUN_DIR / run_name(sha)
     if not path.exists():
         dirty = RUN_DIR / run_name(sha, dirty=True)
@@ -126,6 +165,16 @@ def interpreter() -> str:
     return f"{sys.implementation.name}-{v.major}.{v.minor}"
 
 
+def tracer_mismatch(before: Dict[str, Any], after: Dict[str, Any]) -> str | None:
+    """Describe runs counted by different tracers, which cannot be compared.
+
+    settrace reports a generator resuming as a call and sys.monitoring does
+    not, so `calls` differ with no code change at all.
+    """
+    b, a = before.get("tracer", "settrace"), after.get("tracer", "settrace")
+    return f"{b} vs {a}" if b != a else None
+
+
 def interpreter_mismatch(before: Dict[str, Any], after: Dict[str, Any]) -> str | None:
     """Describe a Python version difference between two runs, if there is one.
 
@@ -143,6 +192,7 @@ def to_dict(
     root: Path,
     script: str,
     commit: str | None = None,
+    tracer: str = "settrace",
 ) -> Dict[str, Any]:
     """Convert a ProfileTracer's raw stats into the serialisable run form."""
     names: Dict[str, str] = {}
@@ -150,6 +200,8 @@ def to_dict(
     def label(filename: str, func: str) -> str:
         if filename not in names:
             names[filename] = display_name(filename, root)
+        if SEP in func:  # a 3.10 key: bare name and first line
+            func = resolve(filename, func)
         return f"{names[filename]}::{func}"
 
     functions: Dict[str, Any] = {}
@@ -170,6 +222,7 @@ def to_dict(
     return {
         "pyxtrace": FORMAT_VERSION,
         "python": interpreter(),
+        "tracer": tracer,
         "script": script,
         "commit": commit,
         "functions": dict(sorted(functions.items())),

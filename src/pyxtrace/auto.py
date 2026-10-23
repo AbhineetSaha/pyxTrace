@@ -26,8 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable
 
-from pyxtrace.bytecode import _QUALNAME
-from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter
+from pyxtrace import monitor
+from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter, merge_base, ref_hint
 
 # how pytest finds tests by default, plus the conftest files they depend on
 _TEST_FILE = re.compile(r"(^test_.*|.*_test|^conftest)\.py$")
@@ -45,9 +45,12 @@ class AutoResult:
     before_label: str
     after_label: str
     tests_compared: int
-    tests_left_out: int
-    changed: set[str] = field(default_factory=set)   # "file::qualname" changed in the diff
-    uncovered: list[str] = field(default_factory=list)  # changed, but no compared test ran it
+    head_only: int = 0                                 # passed on the head only: new or fixed
+    failed: list[str] = field(default_factory=list)   # failed on the head, not compared
+    changed: set[str] = field(default_factory=set)    # "file::qualname" changed in the diff
+    new: set[str] = field(default_factory=set)        # changed, and not in the base at all
+    uncovered: list[str] = field(default_factory=list)  # changed, and no passing test ran it
+    unbaselined: list[str] = field(default_factory=list)  # run only by tests new on the head
 
 
 def is_test_path(path: str) -> bool:
@@ -126,21 +129,53 @@ def functions_at(source: str, lines: Iterable[int]) -> set[str]:
     return found
 
 
-def _changed_functions(base: str, head: str, head_tree: Path) -> set[str]:
+def _all_functions(path: Path) -> set[str]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return set()
+    return functions_at(source, range(1, source.count("\n") + 2))
+
+
+def _changed_functions(base: str, head: str, head_tree: Path,
+                       new_files: Iterable[str] = ()) -> set[str]:
+    """Functions the diff touches; every function in *new_files* (untracked) counts."""
     text = _git_ok("diff", "-U0", "--no-color", "--no-ext-diff", base, head, "--", "*.py")
+    lines_by_path = changed_lines(text)
+    for path in new_files:
+        if path.endswith(".py"):
+            lines_by_path[path] = set(range(1, _line_count(head_tree / path) + 1))
     changed = set()
-    for path, lines in changed_lines(text).items():
+    for path, lines in lines_by_path.items():
         if is_test_path(path):
             continue
         try:
             source = (head_tree / path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        names = functions_at(source, lines)
-        if not _QUALNAME:  # 3.10 runs key functions by bare name
-            names = {q.rsplit(".", 1)[-1] for q in names}
-        changed |= {f"{path}::{q}" for q in names}
+        changed |= {f"{path}::{q}" for q in functions_at(source, lines)}
     return changed
+
+
+def _line_count(path: Path) -> int:
+    try:
+        return len(path.read_bytes().splitlines())
+    except OSError:
+        return 0
+
+
+def _untracked() -> list[str]:
+    """Files git does not track and does not ignore, relative to the checkout's top.
+
+    `git stash create` leaves them out, so a module that is new and not yet
+    added would be missing from the working-tree side.
+    """
+    top = _git_ok("rev-parse", "--show-toplevel").strip()
+    out = _git_ok("-C", top, "ls-files", "--others", "--exclude-standard", "-z")
+    top_path = Path(top)
+    return [p for p in out.split("\0")
+            if p and not p.startswith(".pyxtrace/") and (top_path / p).is_file()
+            and not (top_path / p).is_symlink()]
 
 
 def is_changed(name: str, changed: set[str]) -> bool:
@@ -175,8 +210,8 @@ def related_changes(name: str, run: Dict[str, Any], changed: set[str], limit: in
 
 
 # ─────────────────────────── running tests ────────────────────────── #
-def _run_tests(tree: Path, label: str, scratch: Path) -> Dict[str, Dict[str, Any]]:
-    """Run pytest in *tree*; per-test counts of the tests that passed."""
+def _run_tests(tree: Path, label: str, scratch: Path) -> tuple[Dict[str, Dict[str, Any]], list[str]]:
+    """Run pytest in *tree*: per-test counts of the tests that passed, and the failed tests."""
     out = scratch / f"{tree.name}.json"
     paths = [str(tree)] + [str(tree / "src")] * (tree / "src").is_dir()
     env = {
@@ -186,6 +221,7 @@ def _run_tests(tree: Path, label: str, scratch: Path) -> Dict[str, Dict[str, Any
         # the worktree's code, not an installed or editable copy of it
         "PYTHONPATH": os.pathsep.join(paths + [p for p in [os.environ.get("PYTHONPATH")] if p]),
         "PYXTRACE_PYTEST_OUT": str(out),
+        "PYXTRACE_TRACER": _tracer(),
         "PYXTRACE_PYTEST_ROOT": str(tree),
     }
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "pyxtrace.pytest_plugin",
@@ -205,8 +241,8 @@ def _run_tests(tree: Path, label: str, scratch: Path) -> Dict[str, Dict[str, Any
         if "No module named pytest" in tail:
             raise AutoDiffError("diff without recorded runs runs your tests: `pip install pytest`")
         raise AutoDiffError(f"pytest could not run on {label}:\n{tail}")
-    data: Dict[str, Dict[str, Any]] = json.loads(out.read_text(encoding="utf-8"))
-    return data
+    data = json.loads(out.read_text(encoding="utf-8"))
+    return data["passed"], data["failed"]
 
 
 def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -224,16 +260,27 @@ def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     return dict(sorted(total.items()))
 
 
+def _tracer() -> str:
+    """The tracer both sides count with: the same interpreter runs both."""
+    return os.environ.get("PYXTRACE_TRACER") or (monitor.NAME if monitor.available() else "settrace")
+
+
 def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
-    return {"pyxtrace": FORMAT_VERSION, "python": interpreter(), "script": "pytest",
-            "commit": sha, "functions": functions}
+    return {"pyxtrace": FORMAT_VERSION, "python": interpreter(), "tracer": _tracer(),
+            "script": "pytest", "commit": sha, "functions": functions}
 
 
-def auto_diff(before: str, after: str | None) -> AutoResult:
-    """Compare *before* and *after* (default: the working tree) by running the tests."""
+def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) -> AutoResult:
+    """Compare *before* and *after* (default: the working tree) by running the tests.
+
+    With *use_merge_base*, the base is where the two diverged, as for a pull
+    request: commits on *before* that *after* does not contain are not part of
+    the change, and comparing against them would report their effect, reversed,
+    as this change's.
+    """
     base = commit_sha(before)
     if base is None:
-        raise AutoDiffError(f"{before}: not a git commit")
+        raise AutoDiffError(f"{before}: not a git commit{ref_hint(before)}")
     if after is None:
         # a commit of the working tree's tracked files, without touching them
         head = _git_ok("stash", "create").strip() or commit_sha("HEAD")
@@ -242,24 +289,43 @@ def auto_diff(before: str, after: str | None) -> AutoResult:
         head = commit_sha(after)
         after_label = f"{after} ({head[:7]})" if head else after
     if head is None:
-        raise AutoDiffError(f"{after}: not a git commit")
+        raise AutoDiffError(f"{after}: not a git commit{ref_hint(after or '')}")
     before_label = f"{before} ({base[:7]})"
+    if use_merge_base:
+        fork = merge_base(base, head)
+        if fork is None:
+            _say(f"⚠ {before} and {after_label} share no history; comparing the two directly")
+        elif fork != base:
+            ahead = _git_ok("rev-list", "--count", f"{fork}..{base}").strip()
+            _say(f"{before} has {ahead} commit(s) this change does not include; comparing "
+                 f"against where they diverged ({fork[:7]}). Pass --no-merge-base to "
+                 f"compare against the tip of {before} instead")
+            base, before_label = fork, f"merge-base of {before} ({fork[:7]})"
 
     scratch = Path(tempfile.mkdtemp(prefix="pyxtrace-"))
     trees = {"base": scratch / "base", "head": scratch / "head"}
     try:
         for name, sha in (("base", base), ("head", head)):
             _git_ok("worktree", "add", "--detach", "--quiet", str(trees[name]), sha)
+        new_files = _untracked() if after is None else []
+        if new_files:
+            top = Path(_git_ok("rev-parse", "--show-toplevel").strip())
+            for path in new_files:
+                dest = trees["head"] / path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(top / path, dest)
+            _say(f"including {len(new_files)} untracked file(s) in the working tree")
 
         # the head's tests run on both sides, so only the code under test differs
-        for path in _git_ok("-C", str(trees["head"]), "ls-files").splitlines():
+        tracked = _git_ok("-C", str(trees["head"]), "ls-files").splitlines()
+        for path in tracked + new_files:
             if is_test_path(path):
                 dest = trees["base"] / path
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(trees["head"] / path, dest)
 
-        b_tests = _run_tests(trees["base"], before_label, scratch)
-        a_tests = _run_tests(trees["head"], after_label, scratch)
+        b_tests, _ = _run_tests(trees["base"], before_label, scratch)
+        a_tests, failed = _run_tests(trees["head"], after_label, scratch)
         common = sorted(set(b_tests) & set(a_tests))
         if not common:
             raise AutoDiffError(
@@ -268,7 +334,12 @@ def auto_diff(before: str, after: str | None) -> AutoResult:
             )
         b_run = _as_run(_merge(b_tests[t] for t in common), base)
         a_run = _as_run(_merge(a_tests[t] for t in common), head)
-        changed = _changed_functions(base, head, trees["head"])
+        changed = _changed_functions(base, head, trees["head"], new_files)
+        # new: the base has no such function at all, so there is nothing to compare it with
+        new = set()
+        for path in {c.split("::", 1)[0] for c in changed}:
+            before_names = {f"{path}::{q}" for q in _all_functions(trees["base"] / path)}
+            new |= {c for c in changed if c.startswith(f"{path}::") and c not in before_names}
     finally:
         for tree in trees.values():
             if tree.exists():
@@ -276,11 +347,15 @@ def auto_diff(before: str, after: str | None) -> AutoResult:
         _git("worktree", "prune")
         shutil.rmtree(scratch, ignore_errors=True)
 
-    ran = {n for n, fn in a_run["functions"].items() if fn["calls"]}
-    uncovered = sorted(c for c in changed if not any(is_changed(n, {c}) for n in ran))
+    def run_by(per_test: Iterable[Dict[str, Any]]) -> set[str]:
+        ran = {n for fns in per_test for n, fn in fns.items() if fn["calls"]}
+        return {c for c in changed if any(is_changed(n, {c}) for n in ran)}
+
+    compared = run_by(a_tests[t] for t in common)
+    anywhere = run_by(a_tests.values())
     return AutoResult(
         before=b_run, after=a_run, before_label=before_label, after_label=after_label,
-        tests_compared=len(common),
-        tests_left_out=len(set(b_tests) | set(a_tests)) - len(common),
-        changed=changed, uncovered=uncovered,
+        tests_compared=len(common), head_only=len(set(a_tests) - set(b_tests)),
+        failed=failed, changed=changed, new=new,
+        uncovered=sorted(changed - anywhere), unbaselined=sorted(anywhere - compared),
     )

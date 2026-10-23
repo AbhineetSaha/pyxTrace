@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+- **A branch is compared from where it diverged.** With no recorded runs,
+  `pyxtrace diff main HEAD` now starts from the merge-base, as a pull request
+  does. Before, commits that landed on `main` after the branch was cut were
+  counted as part of the change, reversed: a speed-up on `main` read as this
+  branch regressing. `--no-merge-base` keeps the old behaviour.
+- `diff` accepts git ranges: `main...HEAD` (from the merge-base) and
+  `main..HEAD` (from `main` itself), for recorded runs too.
+- **Run file format 3.** Runs from earlier versions are refused with a message
+  saying to record them again; if CI caches `.pyxtrace/`, change the cache key.
+  Two reasons:
+  - **The default root is the git checkout**, not the script's directory. A
+    script in `benchmarks/` used to trace only itself, so the gate passed
+    whatever the package did. Names are now relative to the checkout
+    (`examples/orders.py::main`). Virtualenvs and `site-packages` inside the
+    root are skipped, whatever they are called.
+  - **Python 3.10 gets qualified names.** It has none on code objects, so two
+    classes' `__init__` shared one entry; the names are now read from the
+    source.
+- **Faster test-suite diffs on Python 3.12+.** Tests are counted with
+  `sys.monitoring` (PEP 669): code outside the root is switched off on its first
+  event instead of being filtered on every call. Each side of a diff took
+  14.2 s → 10.8 s on jinja's suite and 12.5 s → 9.8 s on rich's. Lines,
+  calls and callers match settrace exactly on the bundled example and on
+  loops, comprehensions, exceptions, recursion and decorators, except that a
+  generator resuming is not a new call. Run files record the tracer (`tracer`)
+  and runs from different tracers are refused. Python 3.10 and 3.11, and
+  free-threaded builds for now, keep settrace. `PYXTRACE_TRACER=settrace`
+  forces it.
+- **Fewer test counts move between identical runs.** Each test now starts
+  from `random.seed(0)` and runs with garbage collection held off. On jinja,
+  5 of 911 tests drew from unseeded `random` and moved by up to 18% between
+  two runs of the same commit, enough to fail the gate; across three runs,
+  none move now. On rich, 1 to 3 of 948 tests still move by under 0.1%, under
+  either tracer: their work follows the clock (timestamps in log lines) or a
+  refresh timer. Collecting before every test as well was measured too, and
+  dropped: it made jinja's traced suite 5x slower.
+- **Nothing is left out silently.** Tests that fail on the head are named.
+  Changed functions the gate could not compare are split into "no test runs
+  it" (existing or new) and "run only by tests new in this change, so there is
+  no baseline yet", under a line saying how many changed functions were
+  compared. Opt in to failing on them with `--require-covered` and
+  `--fail-on-test-failure`.
+- Comparing against the working tree includes new files not yet added to git.
+- A ref that is not a commit here suggests `origin/<ref>` when that exists,
+  and says when the checkout is a shallow clone missing the history.
 - **`pyxtrace diff main HEAD` works with no recorded runs.** It runs the pytest
   suite on both commits in temporary git worktrees, compares the tests that
   passed on both, marks each regression with the changed functions it traces

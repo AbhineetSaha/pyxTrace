@@ -20,13 +20,35 @@ from typing import Any, Dict, List, Tuple
 Key = Tuple[str, str]  # (file, qualified function name)
 
 # `Cursor.execute`, not `execute`: two classes' `__init__` in one file must not
-# merge into one entry. co_qualname is 3.11+; 3.10 falls back to the bare name.
+# merge into one entry. co_qualname is 3.11+; on 3.10 the key is the bare name
+# and first line, which names.py turns into the same qualified name from source.
 _QUALNAME = sys.version_info >= (3, 11)
+# separates the two parts of a 3.10 key; no name contains it. Defined here, not
+# in names.py, so this module still loads on its own (benchmarks/overhead.py)
+SEP = "\x00"
+
+
+# installed code that can sit inside a project: never the project's own
+_INSTALLED = {"site-packages", "dist-packages", "node_modules", "__pypackages__"}
+
+
+def _installed(path: Path, root: Path) -> bool:
+    """Is *path* inside a virtualenv or package directory under *root*?
+
+    A virtualenv is recognised by its ``pyvenv.cfg``, whatever it is called
+    (.venv, venv, .tox/py312, .nox/tests).
+    """
+    d = root
+    for part in path.relative_to(root).parts[:-1]:
+        d = d / part
+        if part in _INSTALLED or (d / "pyvenv.cfg").is_file():
+            return True
+    return False
 
 
 def in_root(filename: str, root: Path, cache: Dict[str, bool]) -> bool:
     """
-    Is *filename* inside *root*?  The answer is memoised in *cache*.
+    Is *filename* the project's own code under *root*?  Memoised in *cache*.
 
     Code objects reuse the same ``co_filename`` string, so the cache hits on
     all but the first event per source file.
@@ -38,7 +60,8 @@ def in_root(filename: str, root: Path, cache: Dict[str, bool]) -> bool:
             keep = False
         else:
             try:
-                keep = Path(filename).resolve().is_relative_to(root)
+                path = Path(filename).resolve()
+                keep = path.is_relative_to(root) and not _installed(path, root)
             except (OSError, RuntimeError):  # built-in / unresolvable frames
                 keep = False
         cache[filename] = keep
@@ -121,7 +144,8 @@ class ProfileTracer:
             ):
                 return None
             # a flag test, not attrgetter: the plain attribute read is ~4% faster
-            key = (code.co_filename, code.co_qualname if _QUALNAME else code.co_name)  # type: ignore[attr-defined]
+            key = (code.co_filename, code.co_qualname if _QUALNAME  # type: ignore[attr-defined]
+                   else f"{code.co_name}{SEP}{code.co_firstlineno}")
             shard = self._local.shard
             s = shard.get(key)
             if s is None:
