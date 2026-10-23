@@ -143,7 +143,7 @@ def _all_functions(path: Path) -> set[str]:
     return functions_at(source, range(1, source.count("\n") + 2))
 
 
-def _changed_functions(base: str, head: str, head_tree: Path,
+def _changed_functions(base: str, head: str, base_tree: Path, head_tree: Path,
                        new_files: Iterable[str] = ()) -> tuple[set[str], str | None]:
     """Functions the diff touches, and why any test at all may be affected, if so.
 
@@ -159,7 +159,9 @@ def _changed_functions(base: str, head: str, head_tree: Path,
             lines_by_path[path] = set(range(1, _line_count(head_tree / path) + 1))
     wide = None
     for path in _git_ok("diff", "--name-only", "--no-renames", base, head).splitlines() + new_files:
-        if not is_test_path(path) and not (path.endswith(".py") and (head_tree / path).is_file()):
+        if is_test_path(path) or (path.endswith(".py") and (head_tree / path).is_file()):
+            continue
+        if not _inert(path, base_tree, head_tree):
             wide = wide or f"{path} changed"
     changed = set()
     for path, lines in lines_by_path.items():
@@ -173,6 +175,32 @@ def _changed_functions(base: str, head: str, head_tree: Path,
         if _outside_functions(source, lines):
             wide = wide or f"{path} changed outside a function"
     return changed, wide
+
+
+def _inert(path: str, base_tree: Path, head_tree: Path) -> bool:
+    """Is *path* a file whose change cannot move a test's counts?
+
+    Prose, CI workflows, and package metadata (a version bump, a dependency
+    that is not installed until someone reinstalls). Without this, nearly
+    every commit runs every test: 20 of rich's last 25 touch a changelog,
+    a README or the version.
+    """
+    # shortcut: a test reading a .md file that pytest does not collect is missed
+    if path.endswith((".md", ".rst")) or path.startswith(".github/"):
+        return True
+    if path == "pyproject.toml" and sys.version_info >= (3, 11):
+        import tomllib
+
+        def rest(tree: Path) -> Any:
+            try:
+                data = tomllib.loads((tree / path).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+            return {k: v for k, v in data.items() if k not in ("project", "build-system")}
+
+        before = rest(base_tree)
+        return before is not None and before == rest(head_tree)
+    return False
 
 
 def _outside_functions(source: str, lines: set[int]) -> bool:
@@ -493,7 +521,7 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
                 base_results[f] = r
                 _store(keys[f], r)
 
-        changed, wide = _changed_functions(base, head, trees["head"], new_files)
+        changed, wide = _changed_functions(base, head, trees["base"], trees["head"], new_files)
         if all_tests or wide:
             selected = files
             if wide and not all_tests:

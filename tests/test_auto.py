@@ -453,6 +453,27 @@ def test_a_change_outside_any_function_runs_every_test_file(repo: Path) -> None:
     assert "running 2 test file(s) on HEAD" in r.stderr
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="reads pyproject.toml with tomllib")
+def test_prose_and_a_version_bump_do_not_run_every_test_file(repo: Path) -> None:
+    _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST,
+                                   "pyproject.toml": '[project]\nname = "shop"\nversion = "1.0"\n'})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "release", {
+        "CHANGELOG.md": "# 1.1\n",
+        "pyproject.toml": '[project]\nname = "shop"\nversion = "1.1"\n',
+        "src/shop/orders.py": ORDERS.replace("return order_id * 1.5", "return order_id * 3 / 2"),
+    })
+    r = _diff(repo, "main", "HEAD")
+    assert "running 1 test file(s) on HEAD" in r.stderr, r.stderr
+    # pytest's own settings are not metadata
+    _commit(repo, "pytest config", {"pyproject.toml": '[project]\nname = "shop"\nversion = "1.1"\n'
+                                                      '[tool.pytest.ini_options]\naddopts = "-q"\n'})
+    r = _diff(repo, "main", "HEAD")
+    assert "pyproject.toml changed, which any test may depend on" in r.stderr
+
+
 def test_code_outside_functions_is_told_from_comments_and_docstrings() -> None:
     src = textwrap.dedent('''\
         """Module docstring."""
