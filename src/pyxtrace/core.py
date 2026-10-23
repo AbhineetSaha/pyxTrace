@@ -18,6 +18,7 @@ from pyxtrace.run import (
     RUN_DIR,
     commit_sha,
     display_name,
+    repo_root,
     run_name,
     save,
     to_dict,
@@ -45,7 +46,7 @@ def _warn(msg: str) -> None:
 class TraceSession:
     script_path: Path
     out: Path | None = None   # .pyxt run file
-    root: Path | None = None  # dir to trace (default: the script's own dir)
+    root: Path | None = None  # dir to trace (default: the repository the script is in)
     # If the script leaves threads running, finish the run at interpreter exit,
     # after Python's own shutdown has waited for them, as `python app.py` does.
     # Only for a process that exits once the run is done: the CLI.
@@ -58,17 +59,22 @@ class TraceSession:
             self.out = Path(self.out).resolve()
         if self.root is not None:
             self.root = Path(self.root).resolve()
+        else:
+            self.root = repo_root(self.script_path.parent) or self.script_path.parent
 
     # ------------------------------------------------------------------ #
     @property
     def trace_root(self) -> Path:
         """Directory whose code is profiled.
 
-        Defaults to the script's own directory, which misses a library that
-        lives anywhere else — installed in site-packages, or one level up from
-        a script in benchmarks/. Point --root at the package to trace it.
+        Defaults to the git checkout the script is in, so a script in
+        benchmarks/ still sees the package it benchmarks, and to the script's
+        own directory outside git. Virtualenvs and site-packages inside it are
+        never counted (see bytecode.in_root). An installed package elsewhere
+        needs --root.
         """
-        return self.root or self.script_path.parent
+        assert self.root is not None  # set in __post_init__
+        return self.root
 
     # ------------------------------------------------------------------ #
     def _exec_script(self, tracer: ProfileTracer) -> None:

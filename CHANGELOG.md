@@ -9,6 +9,18 @@
   branch regressing. `--no-merge-base` keeps the old behaviour.
 - `diff` accepts git ranges: `main...HEAD` (from the merge-base) and
   `main..HEAD` (from `main` itself), for recorded runs too.
+- **Run file format 3.** Runs from earlier versions are refused with a message
+  saying to record them again; if CI caches `.pyxtrace/`, change the cache key.
+  Two reasons:
+  - **The default root is the git checkout**, not the script's directory. A
+    script in `benchmarks/` used to trace only itself, so the gate passed
+    whatever the package did. Names are now relative to the checkout
+    (`examples/orders.py::main`). Virtualenvs and `site-packages` inside the
+    root are skipped, whatever they are called.
+  - **Python 3.10 gets qualified names.** It has none on code objects, so two
+    classes' `__init__` shared one entry; the names are now read from the
+    source.
+- Comparing against the working tree includes new files not yet added to git.
 - A ref that is not a commit here suggests `origin/<ref>` when that exists,
   and says when the checkout is a shallow clone missing the history.
 - **`pyxtrace diff main HEAD` works with no recorded runs.** It runs the pytest

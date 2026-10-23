@@ -69,8 +69,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("-o", "--out", type=Path,
                      help="run file to write (default .pyxtrace/<commit sha>.pyxt)")
     run.add_argument("--root", type=Path,
-                     help="directory to profile (default: the script's own directory); "
-                          "point this at an installed or out-of-tree package to trace it")
+                     help="directory to profile (default: the git checkout the script is in, "
+                          "else the script's own directory; virtualenvs inside it are "
+                          "skipped); point this at an installed package to trace it")
 
     d = sub.add_parser("diff", help="compare two runs and exit 1 on a performance regression")
     d.add_argument("before", help="commit (main, HEAD, a sha), a range (main...HEAD, "

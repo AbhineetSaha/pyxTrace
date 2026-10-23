@@ -116,16 +116,16 @@ The bundled example has a batched customer lookup. Set `PYXTRACE_NPLUSONE=1` and
 it fetches each order's customer individually instead:
 
 ```
-⚠  orders.py::process_order  +120 calls to other functions  (same code, more work)
+⚠  examples/orders.py::process_order  +120 calls to other functions  (same code, more work)
    process_order() runs 120x and makes 1 more call(s) to fetch_customer() each time
    Attributed to:
-     orders.py::fetch_customer   0 → 120 calls   new
+     examples/orders.py::fetch_customer   0 → 120 calls   new
 
-⚠  orders.py::Cursor.execute  +5,950% operations  (6 → 363)
+⚠  examples/orders.py::Cursor.execute  +5,950% operations  (6 → 363)
 
-⚠  orders.py::fetch_customer  new operations  (0 → 240)
+⚠  examples/orders.py::fetch_customer  new operations  (0 → 240)
    Attributed to:
-     orders.py::Cursor.execute   0 → 120 calls   new
+     examples/orders.py::Cursor.execute   0 → 120 calls   new
 
 ✗ FAIL — 3 function(s) regressed
 ```
@@ -147,14 +147,15 @@ pyxtrace examples/orders.py
 ```
 
 ```
-                pyxTrace – orders.py
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┓
-┃ function                   ┃ calls ┃ lines ┃ own ms ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━┩
-│ orders.py::process_order   │   120 │   360 │    0.2 │
-│ orders.py::handle_request  │     1 │   245 │    0.1 │
-│ orders.py::fetch_orders    │     1 │   122 │    0.0 │
-└────────────────────────────┴───────┴───────┴────────┘
+                 pyxTrace – examples/orders.py
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━┓
+┃ function                            ┃ calls ┃ lines ┃ own ms ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━┩
+│ examples/orders.py::serialize       │   120 │   480 │    0.2 │
+│ examples/orders.py::process_order   │   120 │   360 │    0.2 │
+│ examples/orders.py::handle_request  │     1 │   245 │    0.1 │
+│ examples/orders.py::fetch_orders    │     1 │   122 │    0.0 │
+└─────────────────────────────────────┴───────┴───────┴────────┘
 ```
 
 `calls` and `lines` are deterministic. `own ms` is timing and varies run to run —
@@ -202,7 +203,7 @@ in the cache key — see *Limits*.
 | `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
-| `--root DIR` | Profile this directory instead of the script's own, for an installed or out-of-tree package |
+| `--root DIR` | Profile this directory instead of the git checkout the script is in, for an installed or out-of-tree package |
 | `--version` | Print the installed version |
 
 `diff` exits **0** on a pass, **1** on a regression, and **2** on a usage error
@@ -223,9 +224,8 @@ away:
   running are waited for exactly as `python app.py` waits for them. Daemon
   threads still running at exit are reported, since their counts are partial.
 - **Names.** Functions are keyed by qualified name (`Cursor.execute`), so two
-  classes' `__init__` never merge into one entry. On Python 3.10, which has no
-  qualified names on code objects, same-named functions in one file share an
-  entry.
+  classes' `__init__` never merge into one entry. Python 3.10 has no qualified
+  names on code objects, so pyxTrace reads them from the source instead.
 
 ## Overhead
 
@@ -260,9 +260,11 @@ Stated plainly, because a profiler that hides these is worse than none:
 - **The workload has to be deterministic itself.** Unseeded `random`, the
   clock, or network responses that steer control flow will move the counts.
   Seed them in the benchmark script.
-- **Only code under one root directory** is profiled — the script's own
-  directory by default, or `--root DIR`. Anything outside it is skipped, and a
-  run that captured nothing but the entry script says so.
+- **Only code under one root directory** is profiled — the git checkout the
+  script is in by default (the script's own directory outside git), or
+  `--root DIR`. Anything outside it is skipped, and so is any virtualenv or
+  `site-packages` inside it. A run that captured nothing but the entry script
+  says so.
 - **Counts are exact per Python minor version, not across them.** The
   interpreter decides which lines emit events, and that changes between
   releases: 3.12 inlined comprehensions, so upgrading from 3.11 moves line

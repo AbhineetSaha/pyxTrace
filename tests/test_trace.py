@@ -15,13 +15,13 @@ def test_profile_run_counts_are_exact(tmp_path: Path) -> None:
     core.TraceSession(EXAMPLE, out=out).run()
 
     data = runfile.load(out)
-    fib = data["functions"]["fibonacci.py::fib"]
+    fib = data["functions"]["examples/fibonacci.py::fib"]
     assert fib["calls"] == 15
     assert fib["lines"] > 0
     # fib recurses into itself 14 times; __main__ makes the 15th call
-    assert fib["callees"]["fibonacci.py::fib"] == 14
-    assert data["functions"]["fibonacci.py::<module>"]["callees"] == {
-        "fibonacci.py::fib": 1
+    assert fib["callees"]["examples/fibonacci.py::fib"] == 14
+    assert data["functions"]["examples/fibonacci.py::<module>"]["callees"] == {
+        "examples/fibonacci.py::fib": 1
     }
 
 
@@ -67,11 +67,11 @@ def test_diff_reports_the_per_item_query_regression(tmp_path: Path, monkeypatch)
     assert findings, "the extra per-order queries should be reported"
 
     by_name = {f["name"]: f for f in findings}
-    assert "orders.py::process_order" in by_name
+    assert "examples/orders.py::process_order" in by_name
 
     # the growth is attributed to the call that caused it
-    callees = {c["name"]: c for c in by_name["orders.py::process_order"]["callees"]}
-    fetch = callees["orders.py::fetch_customer"]
+    callees = {c["name"]: c for c in by_name["examples/orders.py::process_order"]["callees"]}
+    fetch = callees["examples/orders.py::fetch_customer"]
     assert (fetch["before"], fetch["after"]) == (0, 120)
 
 

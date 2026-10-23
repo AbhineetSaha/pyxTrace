@@ -26,7 +26,6 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable
 
-from pyxtrace.bytecode import _QUALNAME
 from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter, merge_base, ref_hint
 
 # how pytest finds tests by default, plus the conftest files they depend on
@@ -126,21 +125,45 @@ def functions_at(source: str, lines: Iterable[int]) -> set[str]:
     return found
 
 
-def _changed_functions(base: str, head: str, head_tree: Path) -> set[str]:
+def _changed_functions(base: str, head: str, head_tree: Path,
+                       new_files: Iterable[str] = ()) -> set[str]:
+    """Functions the diff touches; every function in *new_files* (untracked) counts."""
     text = _git_ok("diff", "-U0", "--no-color", "--no-ext-diff", base, head, "--", "*.py")
+    lines_by_path = changed_lines(text)
+    for path in new_files:
+        if path.endswith(".py"):
+            lines_by_path[path] = set(range(1, _line_count(head_tree / path) + 1))
     changed = set()
-    for path, lines in changed_lines(text).items():
+    for path, lines in lines_by_path.items():
         if is_test_path(path):
             continue
         try:
             source = (head_tree / path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        names = functions_at(source, lines)
-        if not _QUALNAME:  # 3.10 runs key functions by bare name
-            names = {q.rsplit(".", 1)[-1] for q in names}
-        changed |= {f"{path}::{q}" for q in names}
+        changed |= {f"{path}::{q}" for q in functions_at(source, lines)}
     return changed
+
+
+def _line_count(path: Path) -> int:
+    try:
+        return len(path.read_bytes().splitlines())
+    except OSError:
+        return 0
+
+
+def _untracked() -> list[str]:
+    """Files git does not track and does not ignore, relative to the checkout's top.
+
+    `git stash create` leaves them out, so a module that is new and not yet
+    added would be missing from the working-tree side.
+    """
+    top = _git_ok("rev-parse", "--show-toplevel").strip()
+    out = _git_ok("-C", top, "ls-files", "--others", "--exclude-standard", "-z")
+    top_path = Path(top)
+    return [p for p in out.split("\0")
+            if p and not p.startswith(".pyxtrace/") and (top_path / p).is_file()
+            and not (top_path / p).is_symlink()]
 
 
 def is_changed(name: str, changed: set[str]) -> bool:
@@ -266,9 +289,18 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) ->
     try:
         for name, sha in (("base", base), ("head", head)):
             _git_ok("worktree", "add", "--detach", "--quiet", str(trees[name]), sha)
+        new_files = _untracked() if after is None else []
+        if new_files:
+            top = Path(_git_ok("rev-parse", "--show-toplevel").strip())
+            for path in new_files:
+                dest = trees["head"] / path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(top / path, dest)
+            _say(f"including {len(new_files)} untracked file(s) in the working tree")
 
         # the head's tests run on both sides, so only the code under test differs
-        for path in _git_ok("-C", str(trees["head"]), "ls-files").splitlines():
+        tracked = _git_ok("-C", str(trees["head"]), "ls-files").splitlines()
+        for path in tracked + new_files:
             if is_test_path(path):
                 dest = trees["base"] / path
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -284,7 +316,7 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) ->
             )
         b_run = _as_run(_merge(b_tests[t] for t in common), base)
         a_run = _as_run(_merge(a_tests[t] for t in common), head)
-        changed = _changed_functions(base, head, trees["head"])
+        changed = _changed_functions(base, head, trees["head"], new_files)
     finally:
         for tree in trees.values():
             if tree.exists():

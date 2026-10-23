@@ -308,3 +308,21 @@ def test_a_shallow_clone_says_why_the_base_is_missing(repo: Path, tmp_path: Path
     r = _diff(clone, first, "HEAD")
     assert r.returncode == 2
     assert "shallow clone" in r.stderr
+
+
+def test_an_untracked_module_is_part_of_the_working_tree(repo: Path) -> None:
+    # not yet `git add`ed: `git stash create` alone would leave it out, and the
+    # head side would fail to import it
+    _write(repo, {
+        "src/shop/lookup.py": "def lookup(cur, cid):\n"
+                              "    cur.execute('one', cid)\n"
+                              "    return {'id': cid}\n",
+        "src/shop/orders.py": _regress(ORDERS).replace(
+            "def fetch_customer(cur, cid):\n",
+            "def fetch_customer(cur, cid):\n    from shop.lookup import lookup\n"
+            "    lookup(cur, cid)\n"),
+    })
+    r = _diff(repo, "main")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 untracked file(s)" in r.stderr
+    assert "src/shop/lookup.py::lookup" in r.stdout

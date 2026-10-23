@@ -17,8 +17,13 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
 
+from pyxtrace.bytecode import SEP
+from pyxtrace.names import resolve
+
 # 2: functions keyed by qualified name (`Cursor.execute`), script relative to root
-FORMAT_VERSION = 2
+# 3: the default root is the git checkout, so names are relative to its top
+#    (`examples/orders.py::f`); 3.10 runs get qualified names too
+FORMAT_VERSION = 3
 
 # Where `pyxtrace run` files a run when no -o is given: one file per commit, so
 # CI can compare "the base of this PR" against "HEAD" by name.
@@ -98,6 +103,14 @@ def current_run() -> Path:
     return RUN_DIR / run_name(commit_sha(), worktree_dirty())
 
 
+def repo_root(path: Path) -> Path | None:
+    """The top of the git checkout containing *path*; None outside one."""
+    r = _git("-C", str(path), "rev-parse", "--show-toplevel")
+    if r is None or r.returncode != 0 or not r.stdout.strip():
+        return None
+    return Path(r.stdout.strip()).resolve()
+
+
 def merge_base(a: str, b: str) -> str | None:
     """Where *a* and *b* diverged; None when they share no history."""
     if a.startswith("-") or b.startswith("-"):  # would be read as options
@@ -175,6 +188,8 @@ def to_dict(
     def label(filename: str, func: str) -> str:
         if filename not in names:
             names[filename] = display_name(filename, root)
+        if SEP in func:  # a 3.10 key: bare name and first line
+            func = resolve(filename, func)
         return f"{names[filename]}::{func}"
 
     functions: Dict[str, Any] = {}

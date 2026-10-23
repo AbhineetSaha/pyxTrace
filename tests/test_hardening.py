@@ -14,7 +14,7 @@ import pytest
 
 from pyxtrace import cli, core
 from pyxtrace import run as runfile
-from pyxtrace.bytecode import ProfileTracer
+from pyxtrace.bytecode import SEP, ProfileTracer
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -147,7 +147,8 @@ def test_per_thread_counts_add_up() -> None:
             t.join()
     finally:
         threading.settrace(None)  # type: ignore[arg-type]
-    (s,) = [s for (_, name), s in tracer.stats.items() if name.endswith("work")]
+    # raw keys: on 3.10 the bare name is followed by SEP and the first line
+    (s,) = [s for (_, name), s in tracer.stats.items() if name.split(SEP)[0].endswith("work")]
     assert s["calls"] == 5
 
 
@@ -198,7 +199,6 @@ def test_generators_and_coroutines_are_deterministic(tmp_path: Path) -> None:
 
 
 # ─────────────────────────────── naming ──────────────────────────────── #
-@pytest.mark.skipif(sys.version_info < (3, 11), reason="co_qualname is 3.11+")
 def test_same_named_methods_are_not_merged(tmp_path: Path) -> None:
     """Keyed by bare name, A.__init__ and B.__init__ were one entry, so growth
     in one was diluted by the other and blamed on neither."""
@@ -321,12 +321,12 @@ def test_diff_findings_only_ever_describe_growth() -> None:
 @pytest.mark.parametrize("content, message", [
     ("{oops", "not a pyxtrace run file"),
     ("[1, 2]", "not a pyxtrace run file"),
-    ('{"pyxtrace": 1, "functions": {}}', "recorded by an older pyxtrace"),
+    ('{"pyxtrace": 2, "functions": {}}', "recorded by an older pyxtrace"),
     ('{"pyxtrace": 99, "functions": {}}', "unsupported run format"),
-    ('{"pyxtrace": 2}', "damaged run file"),
-    ('{"pyxtrace": 2, "functions": {"f": {"calls": "3", "lines": 1, "callees": {}}}}',
+    ('{"pyxtrace": 3}', "damaged run file"),
+    ('{"pyxtrace": 3, "functions": {"f": {"calls": "3", "lines": 1, "callees": {}}}}',
      "damaged run file"),
-    ('{"pyxtrace": 2, "functions": {"f": {"calls": 3, "lines": -1, "callees": {}}}}',
+    ('{"pyxtrace": 3, "functions": {"f": {"calls": 3, "lines": -1, "callees": {}}}}',
      "damaged run file"),
 ])
 def test_a_bad_run_file_is_refused_with_a_reason(tmp_path: Path, content: str, message: str) -> None:
@@ -537,3 +537,88 @@ def test_a_run_that_cannot_be_saved_at_exit_fails_the_command(tmp_path: Path) ->
     r = _cli("a.py", "-o", "out/a.pyxt", cwd=tmp_path)
     assert r.returncode == 1, r.stdout + r.stderr
     assert "could not record the run" in r.stderr
+
+
+NESTED = (
+    "import functools\n"
+    "class Outer:\n"
+    "    class Inner:\n"
+    "        def m(self):\n"
+    "            return [x for x in range(3)]\n"
+    "    @functools.lru_cache\n"
+    "    def cached(self):\n"
+    "        f = lambda y: {k: k for k in range(y)}\n"
+    "        return f(2)\n"
+    "def outer(items=[lambda: 1]):\n"
+    "    def inner():\n"
+    "        return sum(i for i in range(4))\n"
+    "    return inner()\n"
+    "async def coro():\n"
+    "    return {lambda: 0 for _ in range(1)}\n"
+)
+
+
+def test_names_from_source_match_the_interpreters() -> None:
+    """3.10 has no co_qualname: names.py derives the same names from the source."""
+    from pyxtrace.names import qualnames
+
+    table = qualnames(NESTED)
+    assert table[("m", 4)] == "Outer.Inner.m"
+    assert table[("cached", 6)] == "Outer.cached"            # from the decorator line
+    assert table[("<lambda>", 8)] == "Outer.cached.<locals>.<lambda>"
+    assert table[("<lambda>", 10)] == "<lambda>"              # a default: enclosing scope
+    assert table[("inner", 11)] == "outer.<locals>.inner"
+    assert table[("<genexpr>", 12)] == "outer.<locals>.inner.<locals>.<genexpr>"
+    assert table[("<lambda>", 15)] == "coro.<locals>.<setcomp>.<lambda>"
+    if sys.version_info[:2] == (3, 11):
+        # the comprehensions 3.12 inlines still have their own code objects here
+        import types
+
+        stack = [c for c in compile(NESTED, "n.py", "exec").co_consts
+                 if isinstance(c, types.CodeType)]
+        while stack:
+            c = stack.pop()
+            stack += [k for k in c.co_consts if isinstance(k, types.CodeType)]
+            assert table[(c.co_name, c.co_firstlineno)] == c.co_qualname
+
+
+# ─────────────────────────────── root ─────────────────────────────── #
+def _git_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(path)], check=True, capture_output=True)
+
+
+@pytest.mark.skipif(subprocess.run(["git", "--version"], capture_output=True).returncode != 0,
+                    reason="needs git")
+def test_a_script_in_a_subdirectory_sees_the_package_beside_it(tmp_path: Path) -> None:
+    """The default root used to be the script's own directory, so a script in
+    benchmarks/ traced only itself and every diff passed."""
+    _git_repo(tmp_path)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("def work():\n    return sum(range(3))\n")
+    script = tmp_path / "benchmarks" / "bench.py"
+    script.parent.mkdir()
+    script.write_text(
+        "import pathlib, sys\n"
+        "sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))\n"
+        "import pkg\n"
+        "pkg.work()\n"
+    )
+    data = _run(script, tmp_path / "run.pyxt")
+    assert data["functions"]["pkg/__init__.py::work"]["calls"] == 1
+    assert data["script"] == "benchmarks/bench.py"
+
+
+def test_a_virtualenv_inside_the_root_is_not_counted(tmp_path: Path) -> None:
+    venv = tmp_path / "anyname"
+    lib = venv / "lib" / "dep.py"
+    lib.parent.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    lib.write_text("def dep():\n    return 1\n")
+    (tmp_path / "app.py").write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(lib.parent)!r})\n"
+        "import dep\n"
+        "dep.dep()\n"
+    )
+    data = _run(tmp_path / "app.py", tmp_path / "run.pyxt")
+    assert not any(name.startswith("anyname/") for name in data["functions"])
