@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`pyxtrace diff main HEAD` works with no recorded runs.** It runs the pytest
+  suite on both commits in temporary git worktrees, compares the tests that
+  passed on both, marks each regression with the changed functions it traces
+  back to, and lists changed functions no test ran.
 - Contributor guide, code of conduct, security policy, and issue and pull
   request templates.
 - CI and publishing hardened: actions pinned to commit hashes, read-only
