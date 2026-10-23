@@ -17,7 +17,7 @@ import sys
 import time
 from pathlib import Path
 
-# x slower than untraced; see PYXTRACE_PRODUCT_STRATEGY.md §18. Sized to catch a
+# x slower than untraced. Sized to catch a
 # structural regression (the cached path filter going away costs ~2,287x), not
 # drift: shared CI runners measured 35x-76x for the same commit, because this is
 # a ratio of two sub-millisecond timings on shared hardware. 2x the worst seen.

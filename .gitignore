@@ -7,3 +7,6 @@ pyxtrace-*.jsonl
 *.pyxt
 .pyxtrace/
 .claude/
+
+# private notes and drafts, kept out of the repo
+notes/
