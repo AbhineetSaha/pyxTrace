@@ -38,6 +38,7 @@ from pyxtrace.run import (
 from pyxtrace.visual import (
     render_auto_header,
     render_diff,
+    render_gate_failure,
     render_interpreter_mismatch,
     render_uncovered,
 )
@@ -83,6 +84,10 @@ def _parser() -> argparse.ArgumentParser:
                    help="fail if a function grows more than this percent (default 10)")
     d.add_argument("--min-ops", type=_non_negative(int), default=10,
                    help="ignore growth smaller than this many operations (default 10)")
+    d.add_argument("--require-covered", action="store_true",
+                   help="when running the tests, fail if a changed function is run by no test")
+    d.add_argument("--fail-on-test-failure", action="store_true",
+                   help="when running the tests, fail if any test fails on AFTER")
     d.add_argument("--no-merge-base", dest="merge_base", action="store_false", default=None,
                    help="when running the tests, compare against the tip of BEFORE rather "
                         "than where AFTER diverged from it (same as BEFORE..AFTER)")
@@ -208,7 +213,7 @@ def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
         r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False)
     except AutoDiffError as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
-    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.tests_left_out)
+    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed)
     findings = diff(r.before, r.after, threshold=a.threshold, min_ops=a.min_ops)
     notes = {}
     for f in findings:
@@ -219,14 +224,24 @@ def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
             if related:
                 notes[f["name"]] = "← on the call path of changed: " + ", ".join(related)
     render_diff(findings, threshold=a.threshold, notes=notes)
-    render_uncovered(r.uncovered)
-    sys.exit(1 if findings else 0)
+    render_uncovered(r.uncovered, r.unbaselined, r.new, len(r.changed))
+    reasons = []
+    if a.require_covered and r.uncovered:
+        reasons.append(f"{len(r.uncovered)} changed function(s) no test runs (--require-covered)")
+    if a.fail_on_test_failure and r.failed:
+        reasons.append(f"{len(r.failed)} test(s) failed (--fail-on-test-failure)")
+    for reason in reasons:
+        render_gate_failure(reason)
+    sys.exit(1 if findings or reasons else 0)
 
 
 def _diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     _split_range(p, a)
     if _no_runs(a):
         _auto_diff(p, a)
+    if a.require_covered or a.fail_on_test_failure:
+        p.error("--require-covered and --fail-on-test-failure apply when diff runs your "
+                "tests, which it does only when no runs are recorded")
     head = a.after or "HEAD"
     if a.merge_base and commit_sha(a.before) and commit_sha(head) \
             and not Path(a.before).is_file() and not Path(head).is_file():

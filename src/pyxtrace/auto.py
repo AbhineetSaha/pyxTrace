@@ -44,9 +44,12 @@ class AutoResult:
     before_label: str
     after_label: str
     tests_compared: int
-    tests_left_out: int
-    changed: set[str] = field(default_factory=set)   # "file::qualname" changed in the diff
-    uncovered: list[str] = field(default_factory=list)  # changed, but no compared test ran it
+    head_only: int = 0                                 # passed on the head only: new or fixed
+    failed: list[str] = field(default_factory=list)   # failed on the head, not compared
+    changed: set[str] = field(default_factory=set)    # "file::qualname" changed in the diff
+    new: set[str] = field(default_factory=set)        # changed, and not in the base at all
+    uncovered: list[str] = field(default_factory=list)  # changed, and no passing test ran it
+    unbaselined: list[str] = field(default_factory=list)  # run only by tests new on the head
 
 
 def is_test_path(path: str) -> bool:
@@ -125,6 +128,14 @@ def functions_at(source: str, lines: Iterable[int]) -> set[str]:
     return found
 
 
+def _all_functions(path: Path) -> set[str]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return set()
+    return functions_at(source, range(1, source.count("\n") + 2))
+
+
 def _changed_functions(base: str, head: str, head_tree: Path,
                        new_files: Iterable[str] = ()) -> set[str]:
     """Functions the diff touches; every function in *new_files* (untracked) counts."""
@@ -198,8 +209,8 @@ def related_changes(name: str, run: Dict[str, Any], changed: set[str], limit: in
 
 
 # ─────────────────────────── running tests ────────────────────────── #
-def _run_tests(tree: Path, label: str, scratch: Path) -> Dict[str, Dict[str, Any]]:
-    """Run pytest in *tree*; per-test counts of the tests that passed."""
+def _run_tests(tree: Path, label: str, scratch: Path) -> tuple[Dict[str, Dict[str, Any]], list[str]]:
+    """Run pytest in *tree*: per-test counts of the tests that passed, and the failed tests."""
     out = scratch / f"{tree.name}.json"
     paths = [str(tree)] + [str(tree / "src")] * (tree / "src").is_dir()
     env = {
@@ -228,8 +239,8 @@ def _run_tests(tree: Path, label: str, scratch: Path) -> Dict[str, Dict[str, Any
         if "No module named pytest" in tail:
             raise AutoDiffError("diff without recorded runs runs your tests: `pip install pytest`")
         raise AutoDiffError(f"pytest could not run on {label}:\n{tail}")
-    data: Dict[str, Dict[str, Any]] = json.loads(out.read_text(encoding="utf-8"))
-    return data
+    data = json.loads(out.read_text(encoding="utf-8"))
+    return data["passed"], data["failed"]
 
 
 def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -306,8 +317,8 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) ->
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(trees["head"] / path, dest)
 
-        b_tests = _run_tests(trees["base"], before_label, scratch)
-        a_tests = _run_tests(trees["head"], after_label, scratch)
+        b_tests, _ = _run_tests(trees["base"], before_label, scratch)
+        a_tests, failed = _run_tests(trees["head"], after_label, scratch)
         common = sorted(set(b_tests) & set(a_tests))
         if not common:
             raise AutoDiffError(
@@ -317,6 +328,11 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) ->
         b_run = _as_run(_merge(b_tests[t] for t in common), base)
         a_run = _as_run(_merge(a_tests[t] for t in common), head)
         changed = _changed_functions(base, head, trees["head"], new_files)
+        # new: the base has no such function at all, so there is nothing to compare it with
+        new = set()
+        for path in {c.split("::", 1)[0] for c in changed}:
+            before_names = {f"{path}::{q}" for q in _all_functions(trees["base"] / path)}
+            new |= {c for c in changed if c.startswith(f"{path}::") and c not in before_names}
     finally:
         for tree in trees.values():
             if tree.exists():
@@ -324,11 +340,15 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) ->
         _git("worktree", "prune")
         shutil.rmtree(scratch, ignore_errors=True)
 
-    ran = {n for n, fn in a_run["functions"].items() if fn["calls"]}
-    uncovered = sorted(c for c in changed if not any(is_changed(n, {c}) for n in ran))
+    def run_by(per_test: Iterable[Dict[str, Any]]) -> set[str]:
+        ran = {n for fns in per_test for n, fn in fns.items() if fn["calls"]}
+        return {c for c in changed if any(is_changed(n, {c}) for n in ran)}
+
+    compared = run_by(a_tests[t] for t in common)
+    anywhere = run_by(a_tests.values())
     return AutoResult(
         before=b_run, after=a_run, before_label=before_label, after_label=after_label,
-        tests_compared=len(common),
-        tests_left_out=len(set(b_tests) | set(a_tests)) - len(common),
-        changed=changed, uncovered=uncovered,
+        tests_compared=len(common), head_only=len(set(a_tests) - set(b_tests)),
+        failed=failed, changed=changed, new=new,
+        uncovered=sorted(changed - anywhere), unbaselined=sorted(anywhere - compared),
     )

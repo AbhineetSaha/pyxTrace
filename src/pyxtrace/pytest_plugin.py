@@ -27,6 +27,7 @@ _ROOT = Path(os.environ.get("PYXTRACE_PYTEST_ROOT", ".")).resolve()
 
 _counts: Dict[str, Dict[str, Any]] = {}
 _passed: set[str] = set()
+_failed: set[str] = set()
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -49,11 +50,22 @@ def pytest_runtest_call(item):
 def pytest_runtest_logreport(report):
     if report.when == "call" and report.passed:
         _passed.add(report.nodeid)
+    elif report.failed:  # in setup, the test itself, or teardown
+        _failed.add(report.nodeid)
+
+
+def pytest_collectreport(report):
+    if report.failed:  # a test module that does not even import
+        _failed.add(report.nodeid)
 
 
 def pytest_sessionfinish(session):
     if not _OUT:
         return
-    # a failed test's counts stop wherever it failed: not comparable
-    data = {nodeid: fns for nodeid, fns in _counts.items() if nodeid in _passed}
+    # a failed test's counts stop wherever it failed: not comparable. A test
+    # that passed its call but failed in teardown is failed too.
+    data = {
+        "passed": {n: fns for n, fns in _counts.items() if n in _passed and n not in _failed},
+        "failed": sorted(_failed),
+    }
     Path(_OUT).write_text(json.dumps(data, sort_keys=True), encoding="utf-8")

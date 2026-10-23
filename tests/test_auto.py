@@ -130,7 +130,10 @@ def test_a_test_for_code_the_base_lacks_is_left_out(repo: Path) -> None:
     })
     r = _diff(repo, "main", "HEAD")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "1 test(s) passed on only one side and were left out" in r.stdout
+    assert "1 test(s) pass only on HEAD" in r.stdout
+    # the new function is run by that test, which has no baseline: not "uncovered"
+    assert "new function(s) no test runs" not in r.stdout
+    assert "run only by tests new in this change" in r.stdout
 
 
 def test_changed_code_no_test_runs_is_named(repo: Path) -> None:
@@ -138,8 +141,9 @@ def test_changed_code_no_test_runs_is_named(repo: Path) -> None:
         "return order_id * 1.5", "return round(order_id * 1.5, 2)")})
     r = _diff(repo, "main", "HEAD")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "not run by any test" in r.stdout
+    assert "1 changed function(s) no test runs, so the gate cannot see them" in r.stdout
     assert "src/shop/orders.py::refund" in r.stdout
+    assert "0 of 1 changed function(s) were compared" in r.stdout
 
 
 def test_uncommitted_changes_are_compared_and_left_alone(repo: Path) -> None:
@@ -326,3 +330,46 @@ def test_an_untracked_module_is_part_of_the_working_tree(repo: Path) -> None:
     assert r.returncode == 1, r.stdout + r.stderr
     assert "1 untracked file(s)" in r.stderr
     assert "src/shop/lookup.py::lookup" in r.stdout
+
+
+# ─────────────────────────── what was left out ─────────────────────── #
+BROKEN_TEST = '''\
+def test_broken():
+    assert 1 == 2
+'''
+
+
+def test_a_test_failing_on_head_is_named_and_only_fails_the_gate_on_request(repo: Path) -> None:
+    _commit(repo, "a failing test", {"tests/test_broken.py": BROKEN_TEST})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test(s) failed on HEAD" in r.stdout
+    assert "tests/test_broken.py::test_broken" in r.stdout
+    r = _diff(repo, "main", "HEAD", "--fail-on-test-failure")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 test(s) failed (--fail-on-test-failure)" in r.stdout
+
+
+def test_require_covered_fails_on_changed_code_no_test_runs(repo: Path) -> None:
+    _commit(repo, "refund", {"src/shop/orders.py": ORDERS.replace(
+        "return order_id * 1.5", "return round(order_id * 1.5, 2)")})
+    r = _diff(repo, "main", "HEAD", "--require-covered")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "no test runs (--require-covered)" in r.stdout
+
+
+def test_a_new_function_no_test_runs_is_listed_as_new(repo: Path) -> None:
+    _commit(repo, "untested feature", {
+        "src/shop/orders.py": ORDERS + "\n\ndef discount(total):\n    return total * 0.9\n"})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 new function(s) no test runs yet" in r.stdout
+    assert "cannot see them" not in r.stdout
+
+
+def test_the_test_only_flags_are_refused_for_recorded_runs(repo: Path, tmp_path: Path) -> None:
+    run = tmp_path / "a.pyxt"
+    run.write_text('{"pyxtrace": 3, "functions": {}}')
+    r = _diff(repo, str(run), str(run), "--require-covered")
+    assert r.returncode == 2
+    assert "apply when diff runs your tests" in r.stderr

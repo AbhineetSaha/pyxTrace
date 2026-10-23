@@ -66,12 +66,16 @@ With no runs recorded, `diff` uses your pytest suite as the workload. It checks
 out both commits into temporary git worktrees (your checkout is never touched),
 runs the head's tests against both versions of the code, and counts each test
 on its own. Only tests that passed on both sides are compared, so a test for a
-feature the base does not have yet is left out rather than reported.
+feature the base does not have yet is left out rather than reported. Tests that
+fail on the head are named, not silently dropped; pyxTrace is not your test
+runner, so run pytest as its own CI job as well (or pass
+`--fail-on-test-failure`).
 
 Each regression is then tied to the diff. A function the change edited is
 marked `← changed in this diff`; one that only got busier names the changed
-functions on its call path. Changed functions that no test ran are listed too,
-because the gate cannot see them:
+functions on its call path. Changed functions the gate could not compare are
+listed too, split by why: no test runs them, or only tests new in this change
+do, so there is no baseline yet:
 
 ```
 ⚠  src/shop/orders.py::process_order  +120 calls to other functions  (same code, more work)
@@ -80,9 +84,12 @@ because the gate cannot see them:
 
 ✗ FAIL — 3 function(s) regressed
 
-⚠  1 changed function(s) were not run by any test, so they were not checked:
+1 of 2 changed function(s) were compared
+⚠  1 changed function(s) no test runs, so the gate cannot see them:
      src/shop/orders.py::refund
 ```
+
+`--require-covered` turns that last warning into a failure.
 
 Only each test's own body is counted, not fixtures or imports. Tracing makes
 tests roughly 9x slower (see *Overhead*), and pytest-xdist is not supported,
@@ -200,6 +207,8 @@ in the cache key — see *Limits*.
 | `pyxtrace run SCRIPT` | Profile → `.pyxtrace/<commit sha>.pyxt` (`run` is optional; `-o` overrides) |
 | `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout. With no runs recorded, runs the pytest suite on both, starting from where `HEAD` branched off `BASE` |
 | `pyxtrace diff BASE...HEAD` / `BASE..HEAD` | As in git: from where the two diverged, or from `BASE` itself |
+| `--require-covered` | With the test suite: fail when a changed function is run by no test |
+| `--fail-on-test-failure` | With the test suite: fail when a test fails on the head |
 | `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |

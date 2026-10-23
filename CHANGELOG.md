@@ -20,6 +20,12 @@
   - **Python 3.10 gets qualified names.** It has none on code objects, so two
     classes' `__init__` shared one entry; the names are now read from the
     source.
+- **Nothing is left out silently.** Tests that fail on the head are named.
+  Changed functions the gate could not compare are split into "no test runs
+  it" (existing or new) and "run only by tests new in this change, so there is
+  no baseline yet", under a line saying how many changed functions were
+  compared. Opt in to failing on them with `--require-covered` and
+  `--fail-on-test-failure`.
 - Comparing against the working tree includes new files not yet added to git.
 - A ref that is not a commit here suggests `origin/<ref>` when that exists,
   and says when the checkout is a shallow clone missing the history.
