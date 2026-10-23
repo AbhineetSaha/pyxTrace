@@ -6,8 +6,8 @@
   request templates.
 - CI and publishing hardened: actions pinned to commit hashes, read-only
   tokens by default, no credentials left on disk after checkout, one release
-  at a time, and a zizmor check that keeps it that way. CodeQL now scans the
-  Python code and the workflows.
+  at a time, and a zizmor check that keeps it that way. CodeQL scanning runs
+  through GitHub's default setup, on the Python code and the workflows.
 
 ## 3.0.0
 
