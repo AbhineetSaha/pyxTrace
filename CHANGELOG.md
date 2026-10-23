@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **A branch is compared from where it diverged.** With no recorded runs,
+  `pyxtrace diff main HEAD` now starts from the merge-base, as a pull request
+  does. Before, commits that landed on `main` after the branch was cut were
+  counted as part of the change, reversed: a speed-up on `main` read as this
+  branch regressing. `--no-merge-base` keeps the old behaviour.
+- `diff` accepts git ranges: `main...HEAD` (from the merge-base) and
+  `main..HEAD` (from `main` itself), for recorded runs too.
+- A ref that is not a commit here suggests `origin/<ref>` when that exists,
+  and says when the checkout is a shallow clone missing the history.
 - **`pyxtrace diff main HEAD` works with no recorded runs.** It runs the pytest
   suite on both commits in temporary git worktrees, compares the tests that
   passed on both, marks each regression with the changed functions it traces

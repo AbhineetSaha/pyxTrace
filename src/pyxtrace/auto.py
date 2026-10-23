@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable
 
 from pyxtrace.bytecode import _QUALNAME
-from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter
+from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter, merge_base, ref_hint
 
 # how pytest finds tests by default, plus the conftest files they depend on
 _TEST_FILE = re.compile(r"(^test_.*|.*_test|^conftest)\.py$")
@@ -229,11 +229,17 @@ def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
             "commit": sha, "functions": functions}
 
 
-def auto_diff(before: str, after: str | None) -> AutoResult:
-    """Compare *before* and *after* (default: the working tree) by running the tests."""
+def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) -> AutoResult:
+    """Compare *before* and *after* (default: the working tree) by running the tests.
+
+    With *use_merge_base*, the base is where the two diverged, as for a pull
+    request: commits on *before* that *after* does not contain are not part of
+    the change, and comparing against them would report their effect, reversed,
+    as this change's.
+    """
     base = commit_sha(before)
     if base is None:
-        raise AutoDiffError(f"{before}: not a git commit")
+        raise AutoDiffError(f"{before}: not a git commit{ref_hint(before)}")
     if after is None:
         # a commit of the working tree's tracked files, without touching them
         head = _git_ok("stash", "create").strip() or commit_sha("HEAD")
@@ -242,8 +248,18 @@ def auto_diff(before: str, after: str | None) -> AutoResult:
         head = commit_sha(after)
         after_label = f"{after} ({head[:7]})" if head else after
     if head is None:
-        raise AutoDiffError(f"{after}: not a git commit")
+        raise AutoDiffError(f"{after}: not a git commit{ref_hint(after or '')}")
     before_label = f"{before} ({base[:7]})"
+    if use_merge_base:
+        fork = merge_base(base, head)
+        if fork is None:
+            _say(f"⚠ {before} and {after_label} share no history; comparing the two directly")
+        elif fork != base:
+            ahead = _git_ok("rev-list", "--count", f"{fork}..{base}").strip()
+            _say(f"{before} has {ahead} commit(s) this change does not include; comparing "
+                 f"against where they diverged ({fork[:7]}). Pass --no-merge-base to "
+                 f"compare against the tip of {before} instead")
+            base, before_label = fork, f"merge-base of {before} ({fork[:7]})"
 
     scratch = Path(tempfile.mkdtemp(prefix="pyxtrace-"))
     trees = {"base": scratch / "base", "head": scratch / "head"}

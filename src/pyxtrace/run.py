@@ -98,13 +98,38 @@ def current_run() -> Path:
     return RUN_DIR / run_name(commit_sha(), worktree_dirty())
 
 
+def merge_base(a: str, b: str) -> str | None:
+    """Where *a* and *b* diverged; None when they share no history."""
+    if a.startswith("-") or b.startswith("-"):  # would be read as options
+        return None
+    r = _git("merge-base", a, b)
+    if r is None or r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def ref_hint(ref: str) -> str:
+    """What to try when *ref* is not a commit here, or "" when there is no better guess.
+
+    CI checkouts usually have no local `main`, only `origin/main`, and a shallow
+    clone has no commits older than its tip at all.
+    """
+    if not ref.startswith("-") and commit_sha(f"origin/{ref}"):
+        return f"; did you mean origin/{ref}?"
+    r = _git("rev-parse", "--is-shallow-repository")
+    if r is not None and r.stdout.strip() == "true":
+        return ("; this is a shallow clone, so older commits are missing "
+                "(fetch the history first; with actions/checkout set fetch-depth: 0)")
+    return ""
+
+
 def path_for(ref: str) -> Path:
     """Resolve a `diff` argument: an existing file, else the run recorded for a commit."""
     if Path(ref).is_file():
         return Path(ref)
     sha = commit_sha(ref)
     if sha is None:
-        raise FileNotFoundError(f"{ref}: not a run file or a git commit")
+        raise FileNotFoundError(f"{ref}: not a run file or a git commit{ref_hint(ref)}")
     path = RUN_DIR / run_name(sha)
     if not path.exists():
         dirty = RUN_DIR / run_name(sha, dirty=True)

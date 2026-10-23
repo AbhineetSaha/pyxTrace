@@ -197,7 +197,9 @@ in the cache key — see *Limits*.
 | Command | What it does |
 |---|---|
 | `pyxtrace run SCRIPT` | Profile → `.pyxtrace/<commit sha>.pyxt` (`run` is optional; `-o` overrides) |
-| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout. With no runs recorded, runs the pytest suite on both |
+| `pyxtrace diff BASE [HEAD]` | Compare two commits (or `.pyxt` paths); exit 1 on regression. Without `HEAD`, compares against the current checkout. With no runs recorded, runs the pytest suite on both, starting from where `HEAD` branched off `BASE` |
+| `pyxtrace diff BASE...HEAD` / `BASE..HEAD` | As in git: from where the two diverged, or from `BASE` itself |
+| `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
 | `--root DIR` | Profile this directory instead of the script's own, for an installed or out-of-tree package |
