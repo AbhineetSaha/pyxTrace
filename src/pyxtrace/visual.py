@@ -130,12 +130,15 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
 
 def render_auto_header(before: str, after: str, compared: int, head_only: int,
-                       failed: list[str], unstable: list[str],
-                       console: Console | None = None) -> None:
+                       failed: list[str], unstable: list[str], files_run: int = 0,
+                       files_total: int = 0, console: Console | None = None) -> None:
     """Say what an automatic diff compared, and what it left out, before its findings."""
     c = console or Console()
     c.print(f"[dim]Compared {escape(before)} → {escape(after)} on {compared:,} test(s) "
             "that passed on both[/]")
+    if files_run < files_total:
+        c.print(f"[dim]Ran {files_run:,} of {files_total:,} test file(s) on {escape(after)}: "
+                "the others run none of the changed code (--all-tests runs them all)[/]")
     if head_only:
         c.print(f"[dim]{head_only:,} test(s) pass only on {escape(after)} (new, or fixed by "
                 "this change) and have no baseline to compare with[/]")

@@ -49,6 +49,8 @@ class AutoResult:
     after_label: str
     tests_compared: int
     head_only: int = 0                                 # passed on the head only: new or fixed
+    files_run: int = 0                                 # test files run on the head
+    files_total: int = 0                               # of all the suite's test files
     failed: list[str] = field(default_factory=list)   # failed on the head, not compared
     unstable: list[str] = field(default_factory=list)  # counts moved between head runs
     changed: set[str] = field(default_factory=set)    # "file::qualname" changed in the diff
@@ -142,13 +144,23 @@ def _all_functions(path: Path) -> set[str]:
 
 
 def _changed_functions(base: str, head: str, head_tree: Path,
-                       new_files: Iterable[str] = ()) -> set[str]:
-    """Functions the diff touches; every function in *new_files* (untracked) counts."""
+                       new_files: Iterable[str] = ()) -> tuple[set[str], str | None]:
+    """Functions the diff touches, and why any test at all may be affected, if so.
+
+    Every function in *new_files* (untracked) counts. A change to anything but
+    a function's code can reach any test: a module constant, an import, a data
+    or config file, a deleted module.
+    """
+    new_files = list(new_files)
     text = _git_ok("diff", "-U0", "--no-color", "--no-ext-diff", base, head, "--", "*.py")
     lines_by_path = changed_lines(text)
     for path in new_files:
         if path.endswith(".py"):
             lines_by_path[path] = set(range(1, _line_count(head_tree / path) + 1))
+    wide = None
+    for path in _git_ok("diff", "--name-only", "--no-renames", base, head).splitlines() + new_files:
+        if not is_test_path(path) and not (path.endswith(".py") and (head_tree / path).is_file()):
+            wide = wide or f"{path} changed"
     changed = set()
     for path, lines in lines_by_path.items():
         if is_test_path(path):
@@ -158,7 +170,35 @@ def _changed_functions(base: str, head: str, head_tree: Path,
         except (OSError, UnicodeDecodeError):
             continue
         changed |= {f"{path}::{q}" for q in functions_at(source, lines)}
-    return changed
+        if _outside_functions(source, lines):
+            wide = wide or f"{path} changed outside a function"
+    return changed, wide
+
+
+def _outside_functions(source: str, lines: set[int]) -> bool:
+    """Do *lines* touch code that runs outside any function body: an import, a
+    constant, a class attribute? Comments, blank lines and docstrings do not count."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return True
+
+    def hit(body: list[ast.stmt]) -> bool:
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                    and isinstance(node.value.value, str):
+                continue  # a docstring
+            if isinstance(node, ast.ClassDef):
+                first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+                if lines & set(range(first, node.body[0].lineno)) or hit(node.body):
+                    return True
+            elif lines & set(range(node.lineno, (node.end_lineno or node.lineno) + 1)):
+                return True
+        return False
+
+    return hit(tree.body)
 
 
 def _line_count(path: Path) -> int:
@@ -348,6 +388,16 @@ def _store(path: Path, result: Dict[str, Any]) -> None:
         _say(f"⚠ could not keep results in {path.parent} ({e.strerror or e}); counting again next time")
 
 
+def _reaches(result: Dict[str, Any], changed: set[str]) -> bool:
+    """Can a change to *changed* move this file's counts, judging by its run on the base?
+
+    A test that failed there ran an unknown part of itself, so it might.
+    """
+    return bool(result["failed"]) or any(
+        fn["calls"] and is_changed(name, changed)
+        for fns in result["passed"].values() for name, fn in fns.items())
+
+
 def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     """Add per-test counts up into one run's functions."""
     total: Dict[str, Dict[str, Any]] = {}
@@ -374,7 +424,8 @@ def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
 
 
 def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
-              jobs: int | None = None, stability_runs: int = 1) -> AutoResult:
+              jobs: int | None = None, stability_runs: int = 1,
+              all_tests: bool = False) -> AutoResult:
     """Compare *before* and *after* (default: the working tree) by running the tests.
 
     With *use_merge_base*, the base is where the two diverged, as for a pull
@@ -441,21 +492,30 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
             for f, r in fresh.items():
                 base_results[f] = r
                 _store(keys[f], r)
-        head_results = _run_files(trees["head"], after_label, files, config, scratch, jobs,
-                                  runs=stability_runs)
+
+        changed, wide = _changed_functions(base, head, trees["head"], new_files)
+        if all_tests or wide:
+            selected = files
+            if wide and not all_tests:
+                _say(f"{wide}, which any test may depend on: running every test file")
+        else:
+            selected = [f for f in files if _reaches(base_results[f], changed)]
+            _say(f"{len(selected)} of {len(files)} test file(s) run code this change touches; "
+                 "running only those (--all-tests runs every one)")
+        head_results = _run_files(trees["head"], after_label, selected, config, scratch, jobs,
+                                  runs=stability_runs) if selected else {}
         b_tests = {t: c for r in base_results.values() for t, c in r["passed"].items()}
         a_tests = {t: c for r in head_results.values() for t, c in r["passed"].items()}
         failed = sorted(t for r in head_results.values() for t in r["failed"])
         unstable = sorted(t for r in head_results.values() for t in r["unstable"])
         common = sorted(set(b_tests) & set(a_tests))
-        if not common:
+        if not common and selected == files:  # with fewer files run, this can be fine
             raise AutoDiffError(
                 "no test passed on both commits, so there is nothing to compare. "
                 "Fix the failing tests, or record runs with `pyxtrace run SCRIPT`"
             )
         b_run = _as_run(_merge(b_tests[t] for t in common), base)
         a_run = _as_run(_merge(a_tests[t] for t in common), head)
-        changed = _changed_functions(base, head, trees["head"], new_files)
         # new: the base has no such function at all, so there is nothing to compare it with
         new = set()
         for path in {c.split("::", 1)[0] for c in changed}:
@@ -477,6 +537,7 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
     return AutoResult(
         before=b_run, after=a_run, before_label=before_label, after_label=after_label,
         tests_compared=len(common), head_only=len(set(a_tests) - set(b_tests)),
+        files_run=len(selected), files_total=len(files),
         failed=failed, unstable=unstable, changed=changed, new=new,
         uncovered=sorted(changed - anywhere), unbaselined=sorted(anywhere - compared),
     )

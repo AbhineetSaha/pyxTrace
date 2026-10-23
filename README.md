@@ -95,6 +95,12 @@ Only each test's own body is counted, not fixtures or imports. Each test file
 runs in its own pytest process, several at once, so a test's counts never depend
 on which other files ran before it; pytest-xdist itself is not used.
 
+On the head, only the test files that can see the change are run: those whose
+tests ran a changed function on the base (or failed there). A change outside
+any function (an import, a constant, a class attribute) or to a non-Python
+file can reach any test, so it runs every file, and says why. `--all-tests`
+always runs every file.
+
 ### With a workload script
 
 Record a run per commit, then compare commits:
@@ -227,6 +233,7 @@ in the cache key — see *Limits*.
 | `--require-covered` | With the test suite: fail when a changed function is run by no test |
 | `--fail-on-test-failure` | With the test suite: fail when a test fails on the head |
 | `--stability-runs N` | With the test suite: run the head's tests N times and leave out, and name, tests whose counts differ (default 1) |
+| `--all-tests` | With the test suite: run every test file on the head, not only those that ran the changed code |
 | `-j N`, `--jobs N` | With the test suite: test files run at once, each in its own process (default: one per CPU) |
 | `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |

@@ -59,6 +59,12 @@
   the head (rich: 10.5 s → 6.0 s), and editing one test file counts only that
   file again. A kept entry is byte-identical to a fresh count. The README's CI
   recipe caches the directory.
+- **Only the test files a change can reach run on the head.** Each test's
+  base results already list the functions it ran, so a file runs on the head
+  only when one of its tests ran a changed function on the base, or failed
+  there. A change outside any function (an import, a module constant, a class
+  attribute), to a non-Python file, or a deleted module runs every file and
+  says why. `--all-tests` runs every file. The report says how many ran.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

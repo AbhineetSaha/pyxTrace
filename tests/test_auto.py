@@ -11,7 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from pyxtrace.auto import changed_lines, functions_at, is_changed, is_test_path, related_changes
+from pyxtrace.auto import (
+    _outside_functions,
+    changed_lines,
+    functions_at,
+    is_changed,
+    is_test_path,
+    related_changes,
+)
 
 pytestmark = pytest.mark.skipif(
     subprocess.run(["git", "--version"], capture_output=True).returncode != 0,
@@ -415,6 +422,57 @@ def test_the_base_is_counted_once_per_test_file(repo: Path) -> None:
     assert "running 1 test file(s) on main" in r.stderr
 
 
+def test_only_test_files_that_run_the_changed_code_run_on_the_head(repo: Path) -> None:
+    _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "slower refund", {"src/shop/orders.py": ORDERS.replace(
+        "    return order_id * 1.5",
+        "    return sum(order_id * 1.5 / 10 for _ in range(10))")})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "src/shop/orders.py::refund" in r.stdout
+    assert "Ran 1 of 2 test file(s) on HEAD" in r.stdout
+    assert "running 1 test file(s) on HEAD" in r.stderr
+    # every file, on request
+    r = _diff(repo, "main", "HEAD", "--all-tests")
+    assert "running 2 test file(s) on HEAD" in r.stderr
+    assert "Ran 1 of 2" not in r.stdout
+
+
+def test_a_change_outside_any_function_runs_every_test_file(repo: Path) -> None:
+    _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "a constant", {"src/shop/orders.py": "RATE = 1.5\n" + ORDERS})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "src/shop/orders.py changed outside a function" in r.stderr
+    assert "running 2 test file(s) on HEAD" in r.stderr
+
+
+def test_code_outside_functions_is_told_from_comments_and_docstrings() -> None:
+    src = textwrap.dedent('''\
+        """Module docstring."""
+        import os
+        RATE = 1.5
+
+        # a comment
+        @dataclass
+        class Shop:
+            """Class docstring."""
+            tax = 0.2
+
+            def total(self):
+                return 1
+        ''')
+    assert not _outside_functions(src, {1, 4, 5, 8, 11, 12})
+    for line in (2, 3, 6, 7, 9):  # import, constant, decorator, class line, class attribute
+        assert _outside_functions(src, {line}), line
+
+
 def test_a_test_whose_counts_move_between_runs_is_left_out(repo: Path, tmp_path: Path) -> None:
     # does more work every time it runs, as a test driven by the clock can
     runs = tmp_path / "runs"
@@ -432,9 +490,10 @@ def test_a_test_whose_counts_move_between_runs_is_left_out(repo: Path, tmp_path:
                     n += 1
             assert sum(1 for _ in range(n * 100)) > 0
         '''})
-    r = _diff(repo, "main", "HEAD")
+    # the test runs no changed code, so only --all-tests runs it on the head
+    r = _diff(repo, "main", "HEAD", "--all-tests")
     assert r.returncode == 1, r.stdout + r.stderr  # the noise, read as a regression
-    r = _diff(repo, "main", "HEAD", "--stability-runs", "2")
+    r = _diff(repo, "main", "HEAD", "--all-tests", "--stability-runs", "2")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "1 test(s) counted differently from one run of HEAD" in r.stdout
     assert "tests/test_unstable.py::test_unstable" in r.stdout
