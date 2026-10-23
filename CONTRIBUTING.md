@@ -41,6 +41,12 @@ pytest -q                        # tests, a few seconds
 python benchmarks/overhead.py    # overhead budget and determinism check
 ```
 
+If you change anything under `.github/workflows/`, also run
+`pip install zizmor && zizmor --offline .github/workflows/`. CI does, and fails on
+unpinned actions, broad token permissions, or script injection. Third-party
+actions are pinned to a full commit hash, with the version in a comment;
+Dependabot keeps those pins up to date.
+
 CI runs these on Linux for Python 3.10 to 3.14 and free-threaded 3.14t, on
 Windows and macOS, and also builds the wheel, installs it into a clean
 environment, and checks that it catches a regression. If you're a first-time
