@@ -10,6 +10,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# the token CI gets can read the code and nothing else
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash   # one syntax on every OS, Windows included
@@ -18,8 +22,10 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
@@ -27,6 +33,11 @@ jobs:
         run: ruff check .
       - name: Mypy
         run: mypy
+      - name: Workflow security (zizmor)
+        # fails on unpinned actions, broad token permissions, script injection
+        run: |
+          pip install zizmor
+          zizmor --offline .github/workflows/
 
   test:
     runs-on: ${{ matrix.os }}
@@ -44,9 +55,11 @@ jobs:
           - { os: macos-latest, python-version: "3.14" }
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -80,8 +93,10 @@ jobs:
     # what PyPI would receive: build it, check it, install it cold, use it
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.13"
       - name: Build

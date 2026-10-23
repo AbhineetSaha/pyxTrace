@@ -9,6 +9,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# read-only by default; the pypi job below asks for exactly what uploading and
+# tagging need
+permissions:
+  contents: read
+
+# one release at a time; a second merge waits instead of racing or cancelling it
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -16,7 +26,9 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       new: ${{ steps.v.outputs.new }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
       - id: v
         run: |
           version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
@@ -41,8 +53,10 @@ jobs:
       id-token: write   # PyPI trusted publishing (OIDC); no token stored anywhere
       contents: write   # to tag the release after a successful upload
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.x"
       - name: Tests must pass on the commit being released
@@ -50,8 +64,10 @@ jobs:
           pip install -e . pytest
           pytest -q
       - run: pip install build && python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
       - name: Tag and create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ needs.check.outputs.version }}" --generate-notes --title "v${{ needs.check.outputs.version }}"
+          # passed as data, never pasted into the script
+          VERSION: ${{ needs.check.outputs.version }}
+        run: gh release create "v$VERSION" --generate-notes --title "v$VERSION"
