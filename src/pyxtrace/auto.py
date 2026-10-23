@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable
 
+from pyxtrace import monitor
 from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter, merge_base, ref_hint
 
 # how pytest finds tests by default, plus the conftest files they depend on
@@ -220,6 +221,7 @@ def _run_tests(tree: Path, label: str, scratch: Path) -> tuple[Dict[str, Dict[st
         # the worktree's code, not an installed or editable copy of it
         "PYTHONPATH": os.pathsep.join(paths + [p for p in [os.environ.get("PYTHONPATH")] if p]),
         "PYXTRACE_PYTEST_OUT": str(out),
+        "PYXTRACE_TRACER": _tracer(),
         "PYXTRACE_PYTEST_ROOT": str(tree),
     }
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "pyxtrace.pytest_plugin",
@@ -258,9 +260,14 @@ def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     return dict(sorted(total.items()))
 
 
+def _tracer() -> str:
+    """The tracer both sides count with: the same interpreter runs both."""
+    return os.environ.get("PYXTRACE_TRACER") or (monitor.NAME if monitor.available() else "settrace")
+
+
 def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
-    return {"pyxtrace": FORMAT_VERSION, "python": interpreter(), "script": "pytest",
-            "commit": sha, "functions": functions}
+    return {"pyxtrace": FORMAT_VERSION, "python": interpreter(), "tracer": _tracer(),
+            "script": "pytest", "commit": sha, "functions": functions}
 
 
 def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) -> AutoResult:

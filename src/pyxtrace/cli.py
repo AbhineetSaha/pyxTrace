@@ -34,6 +34,7 @@ from pyxtrace.run import (
     load,
     merge_base,
     path_for,
+    tracer_mismatch,
 )
 from pyxtrace.visual import (
     render_auto_header,
@@ -265,6 +266,10 @@ def _diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     except (OSError, ValueError) as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
 
+    tracers = tracer_mismatch(b_run, a_run)
+    if tracers:
+        p.exit(2, f"pyxtrace: error: the runs were counted by different tracers ({tracers}), "
+                  "whose counts differ with no code change; record both with one pyxtrace\n")
     mismatch = interpreter_mismatch(b_run, a_run)
     if mismatch:
         render_interpreter_mismatch(mismatch)

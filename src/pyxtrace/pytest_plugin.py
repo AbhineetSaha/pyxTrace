@@ -21,11 +21,15 @@ from typing import Any, Dict
 
 import pytest
 
+from pyxtrace import monitor
 from pyxtrace.bytecode import ProfileTracer
 from pyxtrace.run import to_dict
 
 _OUT = os.environ.get("PYXTRACE_PYTEST_OUT")
 _ROOT = Path(os.environ.get("PYXTRACE_PYTEST_ROOT", ".")).resolve()
+# both sides of a diff run in the same interpreter, so they pick the same tracer
+_TRACER = os.environ.get("PYXTRACE_TRACER") or (
+    monitor.NAME if monitor.available() else "settrace")
 
 _counts: Dict[str, Dict[str, Any]] = {}
 _passed: set[str] = set()
@@ -46,13 +50,43 @@ def pytest_runtest_call(item):
     if not _OUT:
         yield
         return
-    tracer = ProfileTracer(root_path=_ROOT)
-    prev_trace, prev_thread_trace = sys.gettrace(), threading.gettrace()
     # no collection inside the test, where it would run at an allocation count
     # that depends on earlier tests and land their finalizers in this one's
     # counts. (Collecting before each test as well costs 5x on jinja's suite.)
     gc_was_on = gc.isenabled()
     gc.disable()
+    try:
+        if _TRACER == monitor.NAME:
+            stats = yield from _with_monitoring()
+        else:
+            stats = yield from _with_settrace()
+    finally:
+        if gc_was_on:
+            gc.enable()
+    _counts[item.nodeid] = to_dict(stats, root=_ROOT, script="pytest", tracer=_TRACER)["functions"]
+
+
+def _with_monitoring():
+    # process-wide: covers every thread without per-thread hooks
+    tracer = monitor.MonitorTracer(root_path=_ROOT)
+    try:
+        tracer.start()
+    except ValueError as e:
+        # falling back to settrace here would compare counts from two tracers
+        raise pytest.UsageError(
+            f"pyxtrace cannot count with sys.monitoring ({e}); another profiler holds "
+            "its slot. Set PYXTRACE_TRACER=settrace to use the slower tracer"
+        ) from None
+    try:
+        yield
+    finally:
+        tracer.stop()
+    return tracer.stats
+
+
+def _with_settrace():
+    tracer = ProfileTracer(root_path=_ROOT)
+    prev_trace, prev_thread_trace = sys.gettrace(), threading.gettrace()
     sys.settrace(tracer)
     threading.settrace(tracer)
     try:
@@ -60,9 +94,7 @@ def pytest_runtest_call(item):
     finally:
         sys.settrace(prev_trace)
         threading.settrace(prev_thread_trace)  # type: ignore[arg-type]
-        if gc_was_on:
-            gc.enable()
-    _counts[item.nodeid] = to_dict(tracer.stats, root=_ROOT, script="pytest")["functions"]
+    return tracer.stats
 
 
 def pytest_runtest_logreport(report):

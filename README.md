@@ -91,9 +91,9 @@ do, so there is no baseline yet:
 
 `--require-covered` turns that last warning into a failure.
 
-Only each test's own body is counted, not fixtures or imports. Tracing makes
-tests roughly 9x slower (see *Overhead*), and pytest-xdist is not supported,
-so on a large suite a workload script is the faster gate.
+Only each test's own body is counted, not fixtures or imports. Both commits'
+suites run, each traced (see *Overhead*), and pytest-xdist is not supported, so
+on a large suite a workload script is the faster gate.
 
 ### With a workload script
 
@@ -235,9 +235,12 @@ away:
 - **Randomness and garbage collection in tests.** When `diff` runs your test
   suite, `random` is seeded the same way before every test, and garbage
   collection is held off while a test runs, so it cannot fire at a point that
-  depends on earlier tests. Measured on jinja and rich: 6 of 1,859 tests moved
-  between identical runs before, none after. Other generators (NumPy, Faker)
-  are still yours to seed.
+  depends on earlier tests. On jinja that took the tests whose counts moved
+  between identical runs from 5 of 911 to none. Still yours to fix: other
+  random generators (NumPy, Faker), and work driven by the clock or by timer
+  threads. On rich, 1 to 3 of 948 tests still move between runs by under
+  0.1%, because log lines carry the time and a live display refreshes on a
+  timer.
 - **Names.** Functions are keyed by qualified name (`Cursor.execute`), so two
   classes' `__init__` never merge into one entry. Python 3.10 has no qualified
   names on code objects, so pyxTrace reads them from the source instead.
@@ -254,8 +257,22 @@ Measured on `fib(22)`, a deliberately call-heavy worst case
 
 `fib(22)` is a deliberate worst case: it does almost nothing between calls, so
 the per-event cost has nothing to amortise against. The real-code column is
-sqlglot parsing 838 SQL statements, which is the number to plan around. Trace a
-representative benchmark script, not your whole test suite.
+sqlglot parsing 838 SQL statements, which is the number to plan around for a
+workload script.
+
+With your test suite, on Python 3.12+ the counting uses `sys.monitoring`
+(PEP 669), which switches code outside the root off for good instead of
+filtering it on every call. Each side of the diff, measured on whole suites:
+
+| Suite | pytest alone | settrace (3.10, 3.11) | sys.monitoring (3.12+) |
+|---|---|---|---|
+| jinja (911 tests) | 2.5 s | 14.2 s | 10.8 s |
+| rich (948 tests) | 5.2 s | 12.5 s | 9.8 s |
+
+The two tracers count calls differently (settrace counts a generator resuming
+as a call), so a run file records which one made it and runs from different
+tracers are never compared. `PYXTRACE_TRACER=settrace` forces the slower one,
+for example when another profiler already holds `sys.monitoring`.
 
 ## Limits
 

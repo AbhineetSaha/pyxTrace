@@ -22,7 +22,8 @@ from pyxtrace.names import resolve
 
 # 2: functions keyed by qualified name (`Cursor.execute`), script relative to root
 # 3: the default root is the git checkout, so names are relative to its top
-#    (`examples/orders.py::f`); 3.10 runs get qualified names too
+#    (`examples/orders.py::f`); 3.10 runs get qualified names too; `tracer` says
+#    which tracer counted (settrace or monitoring), and the two never compare
 FORMAT_VERSION = 3
 
 # Where `pyxtrace run` files a run when no -o is given: one file per commit, so
@@ -164,6 +165,16 @@ def interpreter() -> str:
     return f"{sys.implementation.name}-{v.major}.{v.minor}"
 
 
+def tracer_mismatch(before: Dict[str, Any], after: Dict[str, Any]) -> str | None:
+    """Describe runs counted by different tracers, which cannot be compared.
+
+    settrace reports a generator resuming as a call and sys.monitoring does
+    not, so `calls` differ with no code change at all.
+    """
+    b, a = before.get("tracer", "settrace"), after.get("tracer", "settrace")
+    return f"{b} vs {a}" if b != a else None
+
+
 def interpreter_mismatch(before: Dict[str, Any], after: Dict[str, Any]) -> str | None:
     """Describe a Python version difference between two runs, if there is one.
 
@@ -181,6 +192,7 @@ def to_dict(
     root: Path,
     script: str,
     commit: str | None = None,
+    tracer: str = "settrace",
 ) -> Dict[str, Any]:
     """Convert a ProfileTracer's raw stats into the serialisable run form."""
     names: Dict[str, str] = {}
@@ -210,6 +222,7 @@ def to_dict(
     return {
         "pyxtrace": FORMAT_VERSION,
         "python": interpreter(),
+        "tracer": tracer,
         "script": script,
         "commit": commit,
         "functions": dict(sorted(functions.items())),

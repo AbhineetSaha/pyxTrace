@@ -622,3 +622,16 @@ def test_a_virtualenv_inside_the_root_is_not_counted(tmp_path: Path) -> None:
     )
     data = _run(tmp_path / "app.py", tmp_path / "run.pyxt")
     assert not any(name.startswith("anyname/") for name in data["functions"])
+
+
+def test_runs_from_different_tracers_are_never_compared(tmp_path: Path) -> None:
+    """settrace counts a generator resuming as a call and sys.monitoring does
+    not: the same code gives different counts."""
+    a, b = tmp_path / "a.pyxt", tmp_path / "b.pyxt"
+    runfile.save({"pyxtrace": runfile.FORMAT_VERSION, "tracer": "settrace",
+                  "script": "x.py", "functions": {}}, a)
+    runfile.save({"pyxtrace": runfile.FORMAT_VERSION, "tracer": "monitoring",
+                  "script": "x.py", "functions": {}}, b)
+    r = _cli("diff", str(a), str(b), cwd=tmp_path)
+    assert r.returncode == 2
+    assert "different tracers (settrace vs monitoring)" in r.stderr
