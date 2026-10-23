@@ -16,7 +16,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       new: ${{ steps.v.outputs.new }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         run: |
           version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
@@ -41,8 +41,8 @@ jobs:
       id-token: write   # PyPI trusted publishing (OIDC); no token stored anywhere
       contents: write   # to tag the release after a successful upload
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
       - name: Tests must pass on the commit being released
