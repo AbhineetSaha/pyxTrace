@@ -38,6 +38,14 @@
   either tracer: their work follows the clock (timestamps in log lines) or a
   refresh timer. Collecting before every test as well was measured too, and
   dropped: it made jinja's traced suite 5x slower.
+- **Each test file runs in its own pytest process, several at once.** A test's
+  counts depended on which tests ran before it: caches they warmed, modules
+  they imported. On rich, 298 of 947 tests counted differently when their file
+  ran alone (one by 47x). A file's counts now depend only on that file, which
+  is what lets results be cached per file, and the files run in parallel:
+  each side of a diff took 6 s → 2.7 s on jinja and 6 s → 4.2 s on rich
+  (8 cores). `-j 1` runs one file at a time, for tests that cannot run side
+  by side.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

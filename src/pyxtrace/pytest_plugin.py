@@ -26,6 +26,8 @@ from pyxtrace.bytecode import ProfileTracer
 from pyxtrace.run import to_dict
 
 _OUT = os.environ.get("PYXTRACE_PYTEST_OUT")
+# with --collect-only: where to write the test files pytest found
+_COLLECT = os.environ.get("PYXTRACE_PYTEST_COLLECT")
 _ROOT = Path(os.environ.get("PYXTRACE_PYTEST_ROOT", ".")).resolve()
 # both sides of a diff run in the same interpreter, so they pick the same tracer
 _TRACER = os.environ.get("PYXTRACE_TRACER") or (
@@ -109,7 +111,23 @@ def pytest_collectreport(report):
         _failed.add(report.nodeid)
 
 
+def _rel(config, nodeid_or_path) -> str:
+    """A node's file, or a path pytest reports, relative to the tree under test."""
+    path = Path(config.rootpath, str(nodeid_or_path).split("::")[0]).resolve()
+    return Path(os.path.relpath(path, _ROOT)).as_posix()
+
+
 def pytest_sessionfinish(session):
+    if _COLLECT:
+        # a module that failed to import is still a file to run: it fails there
+        files = [_rel(session.config, n) for n in
+                 [i.nodeid for i in session.items] + sorted(_failed)]
+        inifile = session.config.inipath
+        Path(_COLLECT).write_text(json.dumps({
+            "files": list(dict.fromkeys(files)),
+            "rootdir": _rel(session.config, session.config.rootpath),
+            "inifile": inifile and _rel(session.config, inifile),
+        }), encoding="utf-8")
     if not _OUT:
         return
     # a failed test's counts stop wherever it failed: not comparable. A test

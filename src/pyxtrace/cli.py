@@ -92,6 +92,9 @@ def _parser() -> argparse.ArgumentParser:
     d.add_argument("--no-merge-base", dest="merge_base", action="store_false", default=None,
                    help="when running the tests, compare against the tip of BEFORE rather "
                         "than where AFTER diverged from it (same as BEFORE..AFTER)")
+    d.add_argument("-j", "--jobs", type=_non_negative(int), default=0,
+                   help="when running the tests, how many test files to run at once "
+                        "(default: one per CPU; 1 if your tests cannot run side by side)")
     return p
 
 
@@ -211,7 +214,7 @@ def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     """No runs recorded: run the test suite on both sides and compare that."""
     try:
         # a pull request is compared from where it branched off, by default
-        r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False)
+        r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False, jobs=a.jobs)
     except AutoDiffError as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
     render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed)

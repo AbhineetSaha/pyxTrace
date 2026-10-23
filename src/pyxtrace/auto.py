@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable
@@ -210,9 +211,15 @@ def related_changes(name: str, run: Dict[str, Any], changed: set[str], limit: in
 
 
 # ─────────────────────────── running tests ────────────────────────── #
-def _run_tests(tree: Path, label: str, scratch: Path) -> tuple[Dict[str, Dict[str, Any]], list[str]]:
-    """Run pytest in *tree*: per-test counts of the tests that passed, and the failed tests."""
-    out = scratch / f"{tree.name}.json"
+_PYTEST = ["-m", "pytest", "-q", "-p", "pyxtrace.pytest_plugin",
+           # test order has to match on both sides; no cache from earlier runs
+           "-p", "no:randomly", "-p", "no:cacheprovider",
+           # a new test importing what the base lacks must not stop the others
+           "--continue-on-collection-errors"]
+
+
+def _pytest(tree: Path, label: str, args: list[str], out: Path, **env: str) -> Dict[str, Any]:
+    """Run pytest in *tree* and read what the plugin wrote to *out*."""
     paths = [str(tree)] + [str(tree / "src")] * (tree / "src").is_dir()
     env = {
         **os.environ,
@@ -220,29 +227,52 @@ def _run_tests(tree: Path, label: str, scratch: Path) -> tuple[Dict[str, Dict[st
         "PYTHONDONTWRITEBYTECODE": "1",
         # the worktree's code, not an installed or editable copy of it
         "PYTHONPATH": os.pathsep.join(paths + [p for p in [os.environ.get("PYTHONPATH")] if p]),
-        "PYXTRACE_PYTEST_OUT": str(out),
         "PYXTRACE_TRACER": _tracer(),
         "PYXTRACE_PYTEST_ROOT": str(tree),
+        **env,
     }
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "pyxtrace.pytest_plugin",
-           # test order has to match on both sides; no cache from earlier runs
-           "-p", "no:randomly", "-p", "no:cacheprovider",
-           # a new test importing what the base lacks must not stop the others
-           "--continue-on-collection-errors"]
-    _say(f"➜ running tests on {label}")
-    r = subprocess.run(cmd, cwd=tree, env=env, capture_output=True, text=True)
+    r = subprocess.run([sys.executable, *_PYTEST, *args], cwd=tree, env=env,
+                       capture_output=True, text=True)
     tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-15:])
-    if r.returncode == 5:
+    if r.returncode not in (0, 1, 5) or not out.is_file():
+        if "No module named pytest" in tail:
+            raise AutoDiffError("diff without recorded runs runs your tests: `pip install pytest`")
+        raise AutoDiffError(f"pytest could not run on {label}:\n{tail}")
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def _collect(tree: Path, label: str, scratch: Path) -> tuple[list[str], list[str]]:
+    """The test files pytest finds in *tree*, and the arguments that keep its rootdir
+    and ini file when it is given one file at a time."""
+    found = _pytest(tree, label, ["--collect-only"], scratch / "collected.json",
+                    PYXTRACE_PYTEST_COLLECT=str(scratch / "collected.json"))
+    if not found["files"]:
         raise AutoDiffError(
             f"no tests found on {label}. Without recorded runs, diff uses your pytest "
             "suite as the workload; add tests, or record runs with `pyxtrace run SCRIPT`"
         )
-    if r.returncode not in (0, 1) or not out.is_file():
-        if "No module named pytest" in tail:
-            raise AutoDiffError("diff without recorded runs runs your tests: `pip install pytest`")
-        raise AutoDiffError(f"pytest could not run on {label}:\n{tail}")
-    data = json.loads(out.read_text(encoding="utf-8"))
-    return data["passed"], data["failed"]
+    config = ["--rootdir", found["rootdir"]] + ["-c", found["inifile"]] * bool(found["inifile"])
+    return found["files"], config
+
+
+def _run_files(tree: Path, label: str, files: list[str], config: list[str], scratch: Path,
+               jobs: int) -> Dict[str, Dict[str, Any]]:
+    """Each test file's results, from a pytest process of its own.
+
+    A test's counts depend on what ran before it in the same process: caches
+    it finds warm, modules already imported. Measured on rich, 298 of 947
+    tests counted differently when their file ran alone. One process per file
+    keeps a file's counts the same whatever else is run, and the files run in
+    parallel.
+    """
+    _say(f"➜ running {len(files)} test file(s) on {label}")
+
+    def one(i: int, f: str) -> Dict[str, Any]:
+        out = scratch / f"{tree.name}-{i}.json"
+        return _pytest(tree, label, [*config, f], out, PYXTRACE_PYTEST_OUT=str(out))
+
+    with ThreadPoolExecutor(jobs) as pool:
+        return dict(zip(files, pool.map(one, range(len(files)), files), strict=True))
 
 
 def _merge(per_test: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -270,7 +300,8 @@ def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
             "script": "pytest", "commit": sha, "functions": functions}
 
 
-def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) -> AutoResult:
+def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
+              jobs: int | None = None) -> AutoResult:
     """Compare *before* and *after* (default: the working tree) by running the tests.
 
     With *use_merge_base*, the base is where the two diverged, as for a pull
@@ -324,8 +355,13 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True) ->
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(trees["head"] / path, dest)
 
-        b_tests, _ = _run_tests(trees["base"], before_label, scratch)
-        a_tests, failed = _run_tests(trees["head"], after_label, scratch)
+        files, config = _collect(trees["head"], after_label, scratch)
+        jobs = jobs or os.cpu_count() or 1
+        base_results = _run_files(trees["base"], before_label, files, config, scratch, jobs)
+        head_results = _run_files(trees["head"], after_label, files, config, scratch, jobs)
+        b_tests = {t: c for r in base_results.values() for t, c in r["passed"].items()}
+        a_tests = {t: c for r in head_results.values() for t, c in r["passed"].items()}
+        failed = sorted(t for r in head_results.values() for t in r["failed"])
         common = sorted(set(b_tests) & set(a_tests))
         if not common:
             raise AutoDiffError(
