@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -373,3 +374,26 @@ def test_the_test_only_flags_are_refused_for_recorded_runs(repo: Path, tmp_path:
     r = _diff(repo, str(run), str(run), "--require-covered")
     assert r.returncode == 2
     assert "apply when diff runs your tests" in r.stderr
+
+
+def test_unseeded_random_does_not_move_a_tests_counts(tmp_path: Path) -> None:
+    """Measured on jinja: tests using unseeded `random` moved by up to 18% from
+    one run to the next, enough to fail the gate on a change that did nothing."""
+    (tmp_path / "test_rand.py").write_text(
+        "import random\n\n"
+        "def work():\n"
+        "    return sum(1 for _ in range(random.randint(1, 10_000)))\n\n"
+        "def test_work():\n"
+        "    assert work() > 0\n"
+    )
+    outs = []
+    for i in range(2):
+        out = tmp_path / f"out{i}.json"
+        env = {**os.environ, "PYTHONHASHSEED": "0", "PYXTRACE_PYTEST_OUT": str(out),
+               "PYXTRACE_PYTEST_ROOT": str(tmp_path)}
+        subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "pyxtrace.pytest_plugin",
+                        "-p", "no:cacheprovider", "-p", "no:randomly", str(tmp_path)],
+                       cwd=tmp_path, env=env, check=True, capture_output=True)
+        fns = json.loads(out.read_text())["passed"]["test_rand.py::test_work"]
+        outs.append({name: (f["calls"], f["lines"]) for name, f in fns.items()})
+    assert outs[0] == outs[1]

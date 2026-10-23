@@ -20,6 +20,12 @@
   - **Python 3.10 gets qualified names.** It has none on code objects, so two
     classes' `__init__` shared one entry; the names are now read from the
     source.
+- **Test counts no longer move between identical runs.** Each test now
+  starts from `random.seed(0)` and runs with garbage collection held off. On
+  jinja and rich, 6 of 1,859 tests used to change counts between two runs of
+  the same commit (by up to 18%, enough to fail the gate); across three runs
+  each, none do now. Collecting before every test as well was measured too,
+  and dropped: it made jinja's traced suite 5x slower.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

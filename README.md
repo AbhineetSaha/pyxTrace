@@ -232,6 +232,12 @@ away:
   no update is lost even on free-threaded Python. Threads the script leaves
   running are waited for exactly as `python app.py` waits for them. Daemon
   threads still running at exit are reported, since their counts are partial.
+- **Randomness and garbage collection in tests.** When `diff` runs your test
+  suite, `random` is seeded the same way before every test, and garbage
+  collection is held off while a test runs, so it cannot fire at a point that
+  depends on earlier tests. Measured on jinja and rich: 6 of 1,859 tests moved
+  between identical runs before, none after. Other generators (NumPy, Faker)
+  are still yours to seed.
 - **Names.** Functions are keyed by qualified name (`Cursor.execute`), so two
   classes' `__init__` never merge into one entry. Python 3.10 has no qualified
   names on code objects, so pyxTrace reads them from the source instead.

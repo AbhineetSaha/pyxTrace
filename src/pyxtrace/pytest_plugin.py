@@ -10,8 +10,10 @@ the tests that passed on both commits.
 
 from __future__ import annotations
 
+import gc
 import json
 import os
+import random
 import sys
 import threading
 from pathlib import Path
@@ -30,6 +32,15 @@ _passed: set[str] = set()
 _failed: set[str] = set()
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    if _OUT:
+        # unseeded `random` changed a test's counts from run to run (measured:
+        # jinja's lorem ipsum tests, by up to 18%). Both sides get the same seed,
+        # and each test the same one whatever ran before it.
+        random.seed(0)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item):
     if not _OUT:
@@ -37,6 +48,11 @@ def pytest_runtest_call(item):
         return
     tracer = ProfileTracer(root_path=_ROOT)
     prev_trace, prev_thread_trace = sys.gettrace(), threading.gettrace()
+    # no collection inside the test, where it would run at an allocation count
+    # that depends on earlier tests and land their finalizers in this one's
+    # counts. (Collecting before each test as well costs 5x on jinja's suite.)
+    gc_was_on = gc.isenabled()
+    gc.disable()
     sys.settrace(tracer)
     threading.settrace(tracer)
     try:
@@ -44,6 +60,8 @@ def pytest_runtest_call(item):
     finally:
         sys.settrace(prev_trace)
         threading.settrace(prev_thread_trace)  # type: ignore[arg-type]
+        if gc_was_on:
+            gc.enable()
     _counts[item.nodeid] = to_dict(tracer.stats, root=_ROOT, script="pytest")["functions"]
 
 
