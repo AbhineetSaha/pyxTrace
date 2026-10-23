@@ -1,0 +1,46 @@
+name: Field report
+description: You tried pyxtrace on a real project. Tell us how it went, good or bad.
+labels: [field report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Real-world results are the most useful feedback this project gets, including
+        "it found nothing" and "it was too slow". Thank you for taking the time.
+  - type: input
+    id: project
+    attributes:
+      label: Project
+      description: A link or a one-line description (for example, "internal Django service, about 40k lines").
+    validations:
+      required: true
+  - type: textarea
+    id: workload
+    attributes:
+      label: What you traced
+      description: The benchmark script or workload, and the --root you used.
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options:
+        - It caught a real regression
+        - It flagged something that wasn't a real regression
+        - It found nothing, correctly
+        - It missed a regression I know is there
+        - It didn't work (crash, empty run, too slow)
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: The diff output, the overhead you saw (traced vs. untraced time), and anything that surprised you.
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: pyxtrace version, Python version, OS
+      placeholder: pyxtrace 3.0.0, Python 3.13, macOS 15

@@ -239,6 +239,9 @@ Stated plainly, because a profiler that hides these is worse than none:
 
 ## Contributing
 
+Contributions are welcome, and the most useful one right now is trying pyxtrace
+on a real project and [reporting what happened](https://github.com/AbhineetSaha/pyxTrace/issues/new?template=field_report.yml).
+
 ```bash
 git clone https://github.com/AbhineetSaha/pyxTrace.git
 cd pyxTrace
@@ -249,8 +252,10 @@ pytest -q                        # tests
 python benchmarks/overhead.py    # overhead + determinism gate
 ```
 
-The overhead gate fails past 150x. If a change pushes it over, that is the change
-to reconsider — this tool is only useful if people can afford to run it.
+[CONTRIBUTING.md](https://github.com/AbhineetSaha/pyxTrace/blob/main/CONTRIBUTING.md) explains how the code is organised and the
+few rules that keep the counts exact. Look for
+[good first issues](https://github.com/AbhineetSaha/pyxTrace/labels/good%20first%20issue)
+to get started. This project follows the [Contributor Covenant](https://github.com/AbhineetSaha/pyxTrace/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 

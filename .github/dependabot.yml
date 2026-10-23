@@ -1,0 +1,12 @@
+# Keep the GitHub Actions used in CI and publishing up to date. Runtime
+# dependencies are left alone: pyxtrace declares a minimum version of rich,
+# not a pin, so there is nothing for a bot to bump.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
