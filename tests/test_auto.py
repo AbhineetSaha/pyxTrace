@@ -421,6 +421,11 @@ def test_the_base_is_counted_once_per_test_file(repo: Path) -> None:
     assert "1 of 2 test file(s) on main" in r.stderr
     assert "running 1 test file(s) on main" in r.stderr
 
+    # a conftest can change any test beside it: every file is counted again
+    _commit(repo, "a fixture", {"tests/conftest.py": "import pytest\n"})
+    r = _diff(repo, "main", "HEAD")
+    assert "running 2 test file(s) on main" in r.stderr, r.stderr
+
 
 def test_only_test_files_that_run_the_changed_code_run_on_the_head(repo: Path) -> None:
     _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
