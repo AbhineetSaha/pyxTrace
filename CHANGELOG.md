@@ -65,7 +65,9 @@
   there. A change outside any function (an import, a module constant, a class
   attribute), to a non-Python file, or a deleted module runs every file and
   says why; prose, `.github/` and a version bump in `pyproject.toml` do not.
-  `--all-tests` runs every file. The report says how many ran.
+  `--all-tests` runs every file. The report says how many ran. Files left out
+  count on the head what they counted on the base, so a function's growth is
+  judged against the whole suite either way.
 - **`--max-test-calls N`** (default 5,000,000): a test that makes more calls
   stops being counted and runs on untraced, and is named in the report rather
   than compared. On sqlglot one stress test makes 70M calls; with the limit,

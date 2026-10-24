@@ -537,8 +537,12 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
             selected = [f for f in files if _reaches(base_results[f], changed)]
             _say(f"{len(selected)} of {len(files)} test file(s) run code this change touches; "
                  "running only those (--all-tests runs every one)")
-        head_results = _run_files(trees["head"], after_label, selected, config, scratch, jobs,
-                                  max_calls, runs=stability_runs) if selected else {}
+        # a file left out counts on the head what it counted on the base; without it,
+        # a function's growth is a share of fewer tests' work than the full suite's
+        head_results = {f: base_results[f] for f in files if f not in selected}
+        if selected:
+            head_results.update(_run_files(trees["head"], after_label, selected, config,
+                                           scratch, jobs, max_calls, runs=stability_runs))
         b_tests = {t: c for r in base_results.values() for t, c in r["passed"].items()}
         a_tests = {t: c for r in head_results.values() for t, c in r["passed"].items()}
         failed = sorted(t for r in head_results.values() for t in r["failed"])
@@ -547,8 +551,7 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         capped = sorted({t for f in selected for r in (base_results[f], head_results[f])
                          for t in r["capped"]})
         common = sorted(set(b_tests) & set(a_tests))
-        # with fewer files run, or tests too large to count, this can be fine
-        if not common and selected == files and not capped:
+        if not common and not capped:
             raise AutoDiffError(
                 "no test passed on both commits, so there is nothing to compare. "
                 "Fix the failing tests, or record runs with `pyxtrace run SCRIPT`"

@@ -441,6 +441,33 @@ def test_only_test_files_that_run_the_changed_code_run_on_the_head(repo: Path) -
     assert "Ran 1 of 2" not in r.stdout
 
 
+def test_running_fewer_files_does_not_change_the_verdict(repo: Path) -> None:
+    """Found on rich (ffe2edc): a helper every test uses grew 177% across the
+    selected files' tests, and under 10% across the whole suite's."""
+    _commit(repo, "formatting", {
+        "src/shop/fmt.py": "def pad(s):\n    return s + ' '\n\n\n"
+                           "def label(n):\n    return pad(str(n))\n",
+        "tests/test_label.py": "from shop.fmt import label\n\n\n"
+                               "def test_label():\n    assert [label(i) for i in range(10)]\n",
+        "tests/test_pad.py": "from shop.fmt import pad\n\n\n"
+                             "def test_pad():\n    assert [pad('x') for _ in range(1000)]\n",
+    })
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "more padding", {"src/shop/fmt.py": (
+        "def pad(s):\n    return s + ' '\n\n\n"
+        "def label(n):\n    s = str(n)\n    for _ in range(5):\n        s = pad(s)\n"
+        "    return s.rstrip() + ' '\n")})
+    r = _diff(repo, "main", "HEAD")
+    assert "Ran 1 of 3 test file(s)" in r.stdout, r.stdout + r.stderr
+    assert "src/shop/fmt.py::label" in r.stdout
+    assert "⚠  src/shop/fmt.py::pad" not in r.stdout, r.stdout  # +5% across the suite
+    full = _diff(repo, "main", "HEAD", "--all-tests")
+    assert full.returncode == r.returncode
+    assert full.stdout == r.stdout.replace(r.stdout.splitlines()[1] + "\n", "")
+
+
 def test_a_change_outside_any_function_runs_every_test_file(repo: Path) -> None:
     _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
     _git(repo, "checkout", "-q", "main")
