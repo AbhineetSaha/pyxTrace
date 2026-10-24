@@ -131,7 +131,8 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
 def render_auto_header(before: str, after: str, compared: int, head_only: int,
                        failed: list[str], unstable: list[str], capped: list[str],
-                       max_calls: int, files_run: int = 0, files_total: int = 0,
+                       max_calls: int, timed_out: list[str], timeout: float,
+                       files_run: int = 0, files_total: int = 0,
                        console: Console | None = None) -> None:
     """Say what an automatic diff compared, and what it left out, before its findings."""
     c = console or Console()
@@ -158,6 +159,11 @@ def render_auto_header(before: str, after: str, compared: int, head_only: int,
                 "not counted, so a regression only they show is missed "
                 "(--max-test-calls):[/]")
         _names(c, capped)
+    if timed_out:
+        c.print(f"[yellow]⚠  {len(timed_out):,} test file(s) were still running after "
+                f"{timeout:g} s on one side and were stopped; their tests were not compared "
+                "(--file-timeout):[/]")
+        _names(c, timed_out)
 
 
 def _names(c: Console, names: list[str], shown: int = 10) -> None:

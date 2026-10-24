@@ -73,6 +73,12 @@
   than compared. On sqlglot one stress test makes 70M calls; with the limit,
   its test file traces in 41 s instead of 227 s (17 s untraced). The
   largest test on jinja makes 324,000 calls, on rich 55,000.
+- **`--file-timeout SECONDS`** (default 600): a test file still running after
+  that long is stopped and named, and its tests are not compared. A pull
+  request that fixes an infinite loop and adds a test for it used to hang
+  the diff for good, because the head's test runs on the base's unfixed code
+  (found on rich's `7338cb9`). A file that timed out is not kept in
+  `.pyxtrace/tests/`, since how long it takes depends on the machine.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

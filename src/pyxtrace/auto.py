@@ -54,6 +54,7 @@ class AutoResult:
     failed: list[str] = field(default_factory=list)   # failed on the head, not compared
     unstable: list[str] = field(default_factory=list)  # counts moved between head runs
     capped: list[str] = field(default_factory=list)    # over max_calls on a side: not counted
+    timed_out: list[str] = field(default_factory=list)  # test files stopped on a side
     changed: set[str] = field(default_factory=set)    # "file::qualname" changed in the diff
     new: set[str] = field(default_factory=set)        # changed, and not in the base at all
     uncovered: list[str] = field(default_factory=list)  # changed, and no passing test ran it
@@ -290,8 +291,12 @@ _PYTEST = ["-m", "pytest", "-q", "-p", "pyxtrace.pytest_plugin",
            "--continue-on-collection-errors"]
 
 
-def _pytest(tree: Path, label: str, args: list[str], out: Path, **env: str) -> Dict[str, Any]:
-    """Run pytest in *tree* and read what the plugin wrote to *out*."""
+def _pytest(tree: Path, label: str, args: list[str], out: Path, timeout: float | None = None,
+            **env: str) -> Dict[str, Any]:
+    """Run pytest in *tree* and read what the plugin wrote to *out*.
+
+    Raises subprocess.TimeoutExpired, after killing pytest, past *timeout* seconds.
+    """
     paths = [str(tree)] + [str(tree / "src")] * (tree / "src").is_dir()
     env = {
         **os.environ,
@@ -304,7 +309,7 @@ def _pytest(tree: Path, label: str, args: list[str], out: Path, **env: str) -> D
         **env,
     }
     r = subprocess.run([sys.executable, *_PYTEST, *args], cwd=tree, env=env,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, timeout=timeout)
     tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-15:])
     if r.returncode not in (0, 1, 5) or not out.is_file():
         if "No module named pytest" in tail:
@@ -328,22 +333,26 @@ def _collect(tree: Path, label: str, scratch: Path) -> tuple[list[str], list[str
 
 
 def _run_files(tree: Path, label: str, files: list[str], config: list[str], scratch: Path,
-               jobs: int, max_calls: int, runs: int = 1) -> Dict[str, Dict[str, Any]]:
+               jobs: int, max_calls: int, timeout: float, runs: int = 1) -> Dict[str, Dict[str, Any]]:
     """Each test file's results, from a pytest process of its own, *runs* times over.
 
     A test's counts depend on what ran before it in the same process: caches
     it finds warm, modules already imported. Measured on rich, 298 of 947
     tests counted differently when their file ran alone. One process per file
     keeps a file's counts the same whatever else is run, and the files run in
-    parallel.
+    parallel. A file still running after *timeout* seconds (0: no limit) is
+    stopped: a test for a fixed hang, run on the code before the fix, never ends.
     """
     _say(f"➜ running {len(files)} test file(s) on {label}" + f", {runs} times" * (runs > 1))
     tasks = [f for _ in range(runs) for f in files]
 
     def one(i: int, f: str) -> Dict[str, Any]:
         out = scratch / f"{tree.name}-{i}.json"
-        return _pytest(tree, label, [*config, f], out, PYXTRACE_PYTEST_OUT=str(out),
-                       PYXTRACE_MAX_CALLS=str(max_calls))
+        try:
+            return _pytest(tree, label, [*config, f], out, timeout or None,
+                           PYXTRACE_PYTEST_OUT=str(out), PYXTRACE_MAX_CALLS=str(max_calls))
+        except subprocess.TimeoutExpired:
+            return {"passed": {}, "failed": [], "capped": [], "timed_out": True}
 
     by_file: Dict[str, list[Dict[str, Any]]] = {f: [] for f in files}
     with ThreadPoolExecutor(jobs) as pool:
@@ -355,6 +364,8 @@ def _run_files(tree: Path, label: str, files: list[str], config: list[str], scra
 def _settle(runs: list[Dict[str, Any]]) -> Dict[str, Any]:
     """One file's result from repeated runs: a test whose counts moved between them is
     unstable, and comparing it would report noise as a regression."""
+    if any(r.get("timed_out") for r in runs):
+        return {"passed": {}, "failed": [], "unstable": [], "capped": [], "timed_out": True}
     first, *rest = runs
     failed = sorted(set().union(*(r["failed"] for r in runs)))
     passed = {t: c for t, c in first["passed"].items() if all(r["passed"].get(t) == c for r in rest)}
@@ -423,10 +434,10 @@ def _store(path: Path, result: Dict[str, Any]) -> None:
 def _reaches(result: Dict[str, Any], changed: set[str]) -> bool:
     """Can a change to *changed* move this file's counts, judging by its run on the base?
 
-    A test that failed there, or was too large to count, ran something
-    unknown, so it might.
+    A test that failed there, was too large to count, or did not finish, ran
+    something unknown, so it might.
     """
-    return bool(result["failed"] or result["capped"]) or any(
+    return bool(result["failed"] or result["capped"] or result.get("timed_out")) or any(
         fn["calls"] and is_changed(name, changed)
         for fns in result["passed"].values() for name, fn in fns.items())
 
@@ -458,7 +469,8 @@ def _as_run(functions: Dict[str, Any], sha: str) -> Dict[str, Any]:
 
 def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
               jobs: int | None = None, stability_runs: int = 1,
-              all_tests: bool = False, max_calls: int = 0) -> AutoResult:
+              all_tests: bool = False, max_calls: int = 0,
+              file_timeout: float = 0) -> AutoResult:
     """Compare *before* and *after* (default: the working tree) by running the tests.
 
     With *use_merge_base*, the base is where the two diverged, as for a pull
@@ -523,10 +535,11 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
                  "counted before, reusing them")
         if missing:
             fresh = _run_files(trees["base"], before_label, missing, config, scratch, jobs,
-                               max_calls)
+                               max_calls, file_timeout)
             for f, r in fresh.items():
                 base_results[f] = r
-                _store(keys[f], r)
+                if not r.get("timed_out"):  # how long a file takes depends on the machine
+                    _store(keys[f], r)
 
         changed, wide = _changed_functions(base, head, trees["base"], trees["head"], new_files)
         if all_tests or wide:
@@ -542,7 +555,8 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         head_results = {f: base_results[f] for f in files if f not in selected}
         if selected:
             head_results.update(_run_files(trees["head"], after_label, selected, config,
-                                           scratch, jobs, max_calls, runs=stability_runs))
+                                           scratch, jobs, max_calls, file_timeout,
+                                           runs=stability_runs))
         b_tests = {t: c for r in base_results.values() for t, c in r["passed"].items()}
         a_tests = {t: c for r in head_results.values() for t, c in r["passed"].items()}
         failed = sorted(t for r in head_results.values() for t in r["failed"])
@@ -550,8 +564,10 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         # too large on either side: a test that grew past the limit is one of them
         capped = sorted({t for f in selected for r in (base_results[f], head_results[f])
                          for t in r["capped"]})
+        timed_out = [f for f in selected
+                     if base_results[f].get("timed_out") or head_results[f].get("timed_out")]
         common = sorted(set(b_tests) & set(a_tests))
-        if not common and not capped:
+        if not common and not capped and not timed_out:
             raise AutoDiffError(
                 "no test passed on both commits, so there is nothing to compare. "
                 "Fix the failing tests, or record runs with `pyxtrace run SCRIPT`"
@@ -580,6 +596,7 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         before=b_run, after=a_run, before_label=before_label, after_label=after_label,
         tests_compared=len(common), head_only=len(set(a_tests) - set(b_tests)),
         files_run=len(selected), files_total=len(files),
-        failed=failed, unstable=unstable, capped=capped, changed=changed, new=new,
+        failed=failed, unstable=unstable, capped=capped, timed_out=timed_out,
+        changed=changed, new=new,
         uncovered=sorted(changed - anywhere), unbaselined=sorted(anywhere - compared),
     )

@@ -468,6 +468,28 @@ def test_running_fewer_files_does_not_change_the_verdict(repo: Path) -> None:
     assert full.stdout == r.stdout.replace(r.stdout.splitlines()[1] + "\n", "")
 
 
+def test_a_test_for_a_fixed_hang_is_stopped_on_the_base(repo: Path) -> None:
+    """Found on rich (7338cb9): a fix for an infinite loop came with a test,
+    and that test never ends on the code before the fix."""
+    _commit(repo, "halving", {"src/shop/halve.py": "def halve(n):\n    while n != 0:\n"
+                                                    "        n -= 2\n    return n\n"})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "fix odd numbers", {
+        "src/shop/halve.py": "def halve(n):\n    while n > 0:\n        n -= 2\n    return n\n",
+        "tests/test_halve.py": "from shop.halve import halve\n\n\n"
+                               "def test_odd():\n    assert halve(3) == -1\n",
+    })
+    r = _diff(repo, "main", "HEAD", "--file-timeout", "3")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test file(s) were still running after 3 s on one side" in r.stdout
+    assert "tests/test_halve.py" in r.stdout
+    assert "on 1 test(s)" in r.stdout  # test_handle_request is still compared
+    # a timeout depends on the machine, so only test_orders.py's base results are kept
+    assert len(list((repo / ".pyxtrace" / "tests").glob("*.json"))) == 1
+
+
 def test_a_change_outside_any_function_runs_every_test_file(repo: Path) -> None:
     _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
     _git(repo, "checkout", "-q", "main")

@@ -242,6 +242,7 @@ in the cache key — see *Limits*.
 | `--stability-runs N` | With the test suite: run the head's tests N times and leave out, and name, tests whose counts differ (default 1) |
 | `--all-tests` | With the test suite: run every test file on the head, not only those that ran the changed code |
 | `--max-test-calls N` | With the test suite: stop counting a test after N calls and name it instead of comparing it (default 5,000,000; 0 for no limit) |
+| `--file-timeout SECONDS` | With the test suite: stop a test file still running after this long and name it instead of comparing its tests (default 600; 0 for no limit) |
 | `-j N`, `--jobs N` | With the test suite: test files run at once, each in its own process (default: one per CPU) |
 | `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
