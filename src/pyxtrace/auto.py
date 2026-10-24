@@ -34,6 +34,8 @@ from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter, merge_ba
 
 # how pytest finds tests by default, plus the conftest files they depend on
 _TEST_FILE = re.compile(r"(^test_.*|.*_test|^conftest)\.py$")
+# shortcut: a package's own test/ or testing/ dir (django.test, numpy.testing) counts as
+# tests, so its changes are never compared; check its parent for __init__.py if one adopts this
 _TEST_DIRS = {"test", "tests", "testing"}
 
 
