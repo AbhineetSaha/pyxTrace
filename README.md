@@ -97,8 +97,10 @@ on which other files ran before it; pytest-xdist itself is not used.
 
 On the head, only the test files that can see the change are run: those whose
 tests ran a changed function on the base (or failed there). A change outside
-any function (an import, a constant, a class attribute) or to a non-Python
-file can reach any test, so it runs every file, and says why. `--all-tests`
+any function (an import, a constant, a class attribute), a method added to or
+removed from a class (an override changes what unchanged calls run), or a
+change to a non-Python file can reach any test, so it runs every file, and
+says why. `--all-tests`
 always runs every file.
 
 A stress test can cost more traced time than the rest of the suite together

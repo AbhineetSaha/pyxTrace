@@ -421,6 +421,11 @@ def test_the_base_is_counted_once_per_test_file(repo: Path) -> None:
     assert "1 of 2 test file(s) on main" in r.stderr
     assert "running 1 test file(s) on main" in r.stderr
 
+    # a conftest can change any test beside it: every file is counted again
+    _commit(repo, "a fixture", {"tests/conftest.py": "import pytest\n"})
+    r = _diff(repo, "main", "HEAD")
+    assert "running 2 test file(s) on main" in r.stderr, r.stderr
+
 
 def test_only_test_files_that_run_the_changed_code_run_on_the_head(repo: Path) -> None:
     _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
@@ -500,6 +505,41 @@ def test_a_change_outside_any_function_runs_every_test_file(repo: Path) -> None:
     assert r.returncode == 0, r.stdout + r.stderr
     assert "src/shop/orders.py changed outside a function" in r.stderr
     assert "running 2 test file(s) on HEAD" in r.stderr
+
+
+def test_an_added_override_runs_every_test_file(repo: Path) -> None:
+    """No base test ran Square.area, which did not exist; every Square().area() runs it now."""
+    shapes = "class Shape:\n    def area(self):\n        return 1\n\n\nclass Square(Shape):\n    pass\n"
+    _commit(repo, "shapes", {
+        "src/shop/shapes.py": shapes,
+        "tests/test_shapes.py": "from shop.shapes import Square\n\n\n"
+                                "def test_area():\n    assert [Square().area() for _ in range(20)]\n",
+    })
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "slower squares", {"src/shop/shapes.py": shapes.replace("    pass\n", (
+        "    def area(self):\n        n = 0\n        for _ in range(3):\n            n += 1\n"
+        "        return n\n"))})
+    r = _diff(repo, "main", "HEAD")
+    assert "src/shop/shapes.py gained or lost a method" in r.stderr, r.stderr
+    assert "running 2 test file(s) on HEAD" in r.stderr
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "src/shop/shapes.py::Square.area" in r.stdout
+
+
+def test_a_conftest_the_head_deleted_does_not_run_on_the_base(repo: Path) -> None:
+    _commit(repo, "a fixture", {"tests/conftest.py": (
+        "import pytest\n\n\n@pytest.fixture(autouse=True)\ndef _stale():\n"
+        "    pytest.fail('a conftest the head deleted ran on the base')\n")})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    (repo / "tests" / "conftest.py").unlink()
+    _commit(repo, "drop the fixture", {})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "on 1 test(s) that passed on both" in r.stdout
 
 
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="reads pyproject.toml with tomllib")

@@ -34,6 +34,8 @@ from pyxtrace.run import FORMAT_VERSION, _git, commit_sha, interpreter, merge_ba
 
 # how pytest finds tests by default, plus the conftest files they depend on
 _TEST_FILE = re.compile(r"(^test_.*|.*_test|^conftest)\.py$")
+# shortcut: a package's own test/ or testing/ dir (django.test, numpy.testing) counts as
+# tests, so its changes are never compared; check its parent for __init__.py if one adopts this
 _TEST_DIRS = {"test", "tests", "testing"}
 
 
@@ -176,6 +178,11 @@ def _changed_functions(base: str, head: str, base_tree: Path, head_tree: Path,
         changed |= {f"{path}::{q}" for q in functions_at(source, lines)}
         if _outside_functions(source, lines):
             wide = wide or f"{path} changed outside a function"
+        # an added or removed override changes what an unchanged call runs, and
+        # no base test ran the new method, so none would be selected
+        gained_or_lost = _all_functions(base_tree / path) ^ _all_functions(head_tree / path)
+        if any("." in q and not q.rsplit(".", 1)[0].endswith("<locals>") for q in gained_or_lost):
+            wide = wide or f"{path} gained or lost a method"
     return changed, wide
 
 
@@ -519,6 +526,11 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         # the head's tests run on both sides, so only the code under test differs
         tracked = _git_ok("-C", str(trees["head"]), "ls-files").splitlines()
         test_paths = sorted(p for p in tracked + new_files if is_test_path(p))
+        # and only them: a conftest the head deleted would still run on the base
+        keep = set(test_paths)
+        for path in _git_ok("-C", str(trees["base"]), "ls-files").splitlines():
+            if is_test_path(path) and path not in keep:
+                (trees["base"] / path).unlink(missing_ok=True)
         for path in test_paths:
             dest = trees["base"] / path
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -583,7 +595,8 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         for tree in trees.values():
             if tree.exists():
                 _git("worktree", "remove", "--force", str(tree))
-        _git("worktree", "prune")
+        # no `worktree prune`: it would also forget the user's own worktrees
+        # whose folder is missing right now (an unplugged disk)
         shutil.rmtree(scratch, ignore_errors=True)
 
     def run_by(per_test: Iterable[Dict[str, Any]]) -> set[str]:
