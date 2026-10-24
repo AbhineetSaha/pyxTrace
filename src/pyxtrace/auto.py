@@ -588,7 +588,8 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         for tree in trees.values():
             if tree.exists():
                 _git("worktree", "remove", "--force", str(tree))
-        _git("worktree", "prune")
+        # no `worktree prune`: it would also forget the user's own worktrees
+        # whose folder is missing right now (an unplugged disk)
         shutil.rmtree(scratch, ignore_errors=True)
 
     def run_by(per_test: Iterable[Dict[str, Any]]) -> set[str]:
