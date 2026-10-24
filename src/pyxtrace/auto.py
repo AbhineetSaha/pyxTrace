@@ -524,6 +524,11 @@ def auto_diff(before: str, after: str | None, *, use_merge_base: bool = True,
         # the head's tests run on both sides, so only the code under test differs
         tracked = _git_ok("-C", str(trees["head"]), "ls-files").splitlines()
         test_paths = sorted(p for p in tracked + new_files if is_test_path(p))
+        # and only them: a conftest the head deleted would still run on the base
+        keep = set(test_paths)
+        for path in _git_ok("-C", str(trees["base"]), "ls-files").splitlines():
+            if is_test_path(path) and path not in keep:
+                (trees["base"] / path).unlink(missing_ok=True)
         for path in test_paths:
             dest = trees["base"] / path
             dest.parent.mkdir(parents=True, exist_ok=True)

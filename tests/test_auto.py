@@ -528,6 +528,20 @@ def test_an_added_override_runs_every_test_file(repo: Path) -> None:
     assert "src/shop/shapes.py::Square.area" in r.stdout
 
 
+def test_a_conftest_the_head_deleted_does_not_run_on_the_base(repo: Path) -> None:
+    _commit(repo, "a fixture", {"tests/conftest.py": (
+        "import pytest\n\n\n@pytest.fixture(autouse=True)\ndef _stale():\n"
+        "    pytest.fail('a conftest the head deleted ran on the base')\n")})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    (repo / "tests" / "conftest.py").unlink()
+    _commit(repo, "drop the fixture", {})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "on 1 test(s) that passed on both" in r.stdout
+
+
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="reads pyproject.toml with tomllib")
 def test_prose_and_a_version_bump_do_not_run_every_test_file(repo: Path) -> None:
     _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST,
