@@ -1,109 +1,78 @@
 #!/usr/bin/env python3
 """
-Regenerate docs/demo/index.html, the page the README demo is recorded from:
+Build the throwaway git repo the README demo is recorded in, and print its path.
 
-    python tools/make_demo.py
-    python -m http.server 8765 --directory docs/demo &
-    npx -y voila-recorder record http://localhost:8765/ --steps tools/demo.steps.yaml
-    ffmpeg -i demo.mp4 -vf "fps=8,scale=820:-1,split[a][b];[a]palettegen[p];[b][p]paletteuse" docs/demo.gif
+    vhs tools/demo.tape        # with pyxtrace and pytest on PATH; writes docs/demo.gif
 
-A terminal-styled page of the run → change → diff story, filled with the real
-CLI output, so the demo cannot drift out of date the way a hand-recorded
-screencast does. tools/demo.steps.yaml is the voila recipe (captions +
-narration) that turns the page into docs/demo.mp4.
+The repo holds examples/orders.py as shop/orders.py and an ordinary pytest
+test. main has the batched customer lookup; the checked-out branch,
+customer-lookup, drops it, so `pyxtrace diff main HEAD` catches the N+1.
+tools/demo.tape types those commands into a real shell, so every line in the
+GIF is what pyxtrace prints today.
 """
 from __future__ import annotations
 
-import io
 import os
-import sys
+import subprocess
 import tempfile
 from pathlib import Path
 
-from rich.console import Console
-from rich.terminal_theme import MONOKAI
-
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-
-from pyxtrace.core import TraceSession  # noqa: E402
-from pyxtrace.run import diff  # noqa: E402
-from pyxtrace.visual import render_diff, render_run  # noqa: E402
-
 EXAMPLE = ROOT / "examples" / "orders.py"
-PAGE = ROOT / "docs" / "demo" / "index.html"
 
-PAGE_TEMPLATE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>PyxTrace demo</title>
-<style>
-  body {{ margin: 0; background: #0f1117; color: #e6e6e6;
-         font-family: -apple-system, system-ui, sans-serif; }}
-  main {{ max-width: 1040px; margin: 0 auto; padding: 56px 24px 120px; }}
-  h1 {{ font-weight: 500; font-size: 30px; margin: 0 0 6px; }}
-  .lead {{ color: #9aa3b2; margin: 0 0 48px; font-size: 17px; }}
-  section {{ margin: 0 0 64px; }}
-  h2 {{ font-size: 15px; font-weight: 500; color: #9aa3b2; margin: 0 0 12px;
-        text-transform: uppercase; letter-spacing: .06em; }}
-  .term {{ background: #161a23; border: 1px solid #262b38; border-radius: 10px;
-           padding: 18px 22px; overflow-x: auto; }}
-  .term pre {{ margin: 0; font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
-               white-space: pre; }}
-</style></head><body><main>
-<h1>PyxTrace</h1>
-<p class="lead">Catch Python performance regressions in CI with deterministic operation counts.</p>
-<section id="run"><h2>1 · Record a run</h2><div class="term">{run}</div></section>
-<section id="change"><h2>2 · Make a change, record again</h2><div class="term">{change}</div></section>
-<section id="diff"><h2>3 · Compare the two commits</h2><div class="term">{diff}</div></section>
-</main></body></html>
-"""
+TEST = '''\
+from shop.orders import Cursor, handle_request
 
 
-def _record(tmp: Path, name: str, n_plus_one: bool) -> dict:
-    os.environ["PYXTRACE_NPLUSONE"] = "1" if n_plus_one else "0"
-    return TraceSession(EXAMPLE, out=tmp / name).run()
+def test_handle_request():
+    assert len(handle_request(Cursor(), batched=True)) == 120
+'''
+
+BATCHED = '''\
+    customers = None
+    if batched:
+        customers = fetch_customers(cur, sorted({o["customer_id"] for o in orders}))
+'''
+
+# fixed identities and dates make the commit shas the same on every run; the
+# user's own git config (signing, aliases, default branch) is kept out
+ENV = {
+    **os.environ,
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "demo",
+    "GIT_AUTHOR_EMAIL": "demo@example.com",
+    "GIT_AUTHOR_DATE": "2026-01-01T12:00:00Z",
+    "GIT_COMMITTER_NAME": "demo",
+    "GIT_COMMITTER_EMAIL": "demo@example.com",
+    "GIT_COMMITTER_DATE": "2026-01-01T12:00:00Z",
+}
 
 
-def _term() -> Console:
-    """A console that records for HTML export and prints nothing to the terminal."""
-    return Console(record=True, width=100, file=io.StringIO(), force_terminal=True)
-
-
-def _html(c: Console) -> str:
-    # MONOKAI: the default export theme renders "red" as #800000, invisible on a dark page
-    return c.export_html(theme=MONOKAI, inline_styles=True, code_format="<pre>{code}</pre>")
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, env=ENV, check=True, capture_output=True)
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        before = _record(tmp, "before.pyxt", n_plus_one=False)
-        after = _record(tmp, "after.pyxt", n_plus_one=True)
-    findings = diff(before, after)
+    repo = Path(tempfile.mkdtemp(prefix="pyxtrace-demo-"))
+    (repo / "shop").mkdir()
+    (repo / "shop" / "__init__.py").touch()
+    (repo / "shop" / "orders.py").write_text(EXAMPLE.read_text())
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_orders.py").write_text(TEST)
+    (repo / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["."]\n')
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "orders service")
 
-    run = _term()
-    run.print("[bold green]$[/] pyxtrace examples/orders.py")
-    run.print("[dim]\\[pyxTrace] ➜ profiling 'examples/orders.py' → .pyxtrace/3f2a9c1.pyxt[/]")
-    render_run(before, console=run)
+    _git(repo, "switch", "-qc", "customer-lookup")
+    orders = repo / "shop" / "orders.py"
+    src = orders.read_text()
+    assert BATCHED in src, "examples/orders.py changed; update BATCHED to match"
+    orders.write_text(src.replace(BATCHED, "    customers = None\n"))
+    _git(repo, "commit", "-qam", "look up each order's customer as we go")
 
-    change = _term()
-    change.print('[bold green]$[/] git commit -am "look up each order\'s customer as we go"')
-    change.print("[dim]\\[main 8b41e7d] look up each order's customer as we go[/]\n")
-    change.print("[bold green]$[/] pyxtrace examples/orders.py")
-    change.print("[dim]\\[pyxTrace] ➜ profiling 'examples/orders.py' → .pyxtrace/8b41e7d.pyxt[/]")
-    render_run(after, console=change)
-
-    d = _term()
-    d.print("[bold green]$[/] pyxtrace diff main HEAD")
-    render_diff(findings, threshold=10.0, console=d)
-    d.print("\n[dim]exit code 1 — the pull request fails[/]")
-
-    PAGE.parent.mkdir(parents=True, exist_ok=True)
-    PAGE.write_text(PAGE_TEMPLATE.format(run=_html(run), change=_html(change), diff=_html(d)))
-    print(f"wrote {PAGE.relative_to(ROOT)}")
-
-    if not findings:
-        print("ERROR: the example produced no findings — demo would be empty")
-        return 1
+    print(repo)
     return 0
 
 

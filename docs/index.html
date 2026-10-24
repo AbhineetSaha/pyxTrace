@@ -38,7 +38,6 @@
         border-radius: 8px; overflow-x: auto; font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   pre code { background: none; padding: 0; font: inherit; }
   .demo { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
-  .caption { text-align: center; color: var(--muted); font-size: 15px; }
   table { border-collapse: collapse; width: 100%; font-size: 16px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
   tr.us td { font-weight: 600; }
@@ -62,8 +61,7 @@
   </p>
 </header>
 
-<img class="demo" src="demo.gif" alt="Recording a run, committing a change, and pyxtrace diff attributing the regression to the call that caused it" width="820" height="513">
-<p class="caption"><a href="demo.mp4">Narrated version (MP4, 1 min)</a></p>
+<img class="demo" src="demo.gif" alt="An ordinary pytest test, a change on a branch, and pyxtrace diff main HEAD tying the regression to the changed function" width="1240" height="680">
 
 <h2>Why</h2>
 <p>Wall-clock benchmarks are noisy enough to make a pull-request gate unreliable.
