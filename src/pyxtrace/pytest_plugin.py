@@ -26,14 +26,19 @@ from pyxtrace.bytecode import ProfileTracer
 from pyxtrace.run import to_dict
 
 _OUT = os.environ.get("PYXTRACE_PYTEST_OUT")
+# with --collect-only: where to write the test files pytest found
+_COLLECT = os.environ.get("PYXTRACE_PYTEST_COLLECT")
 _ROOT = Path(os.environ.get("PYXTRACE_PYTEST_ROOT", ".")).resolve()
 # both sides of a diff run in the same interpreter, so they pick the same tracer
 _TRACER = os.environ.get("PYXTRACE_TRACER") or (
     monitor.NAME if monitor.available() else "settrace")
+# a test past this many calls stops being counted (0: no limit)
+_MAX_CALLS = int(os.environ.get("PYXTRACE_MAX_CALLS") or 0)
 
 _counts: Dict[str, Dict[str, Any]] = {}
 _passed: set[str] = set()
 _failed: set[str] = set()
+_capped: set[str] = set()
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -57,18 +62,25 @@ def pytest_runtest_call(item):
     gc.disable()
     try:
         if _TRACER == monitor.NAME:
-            stats = yield from _with_monitoring()
+            tracer = yield from _with_monitoring()
         else:
-            stats = yield from _with_settrace()
+            tracer = yield from _with_settrace()
     finally:
         if gc_was_on:
             gc.enable()
-    _counts[item.nodeid] = to_dict(stats, root=_ROOT, script="pytest", tracer=_TRACER)["functions"]
+    if tracer.capped:
+        _capped.add(item.nodeid)
+    else:
+        fns = to_dict(tracer.stats, root=_ROOT, script="pytest", tracer=_TRACER)["functions"]
+        # settrace times each function; a timing differs every run, and counts are
+        # compared run against run and kept as cache entries
+        _counts[item.nodeid] = {n: {k: v for k, v in fn.items() if k != "own_time"}
+                                for n, fn in fns.items()}
 
 
 def _with_monitoring():
     # process-wide: covers every thread without per-thread hooks
-    tracer = monitor.MonitorTracer(root_path=_ROOT)
+    tracer = monitor.MonitorTracer(root_path=_ROOT, max_calls=_MAX_CALLS)
     try:
         tracer.start()
     except ValueError as e:
@@ -81,11 +93,11 @@ def _with_monitoring():
         yield
     finally:
         tracer.stop()
-    return tracer.stats
+    return tracer
 
 
 def _with_settrace():
-    tracer = ProfileTracer(root_path=_ROOT)
+    tracer = ProfileTracer(root_path=_ROOT, max_calls=_MAX_CALLS)
     prev_trace, prev_thread_trace = sys.gettrace(), threading.gettrace()
     sys.settrace(tracer)
     threading.settrace(tracer)
@@ -94,7 +106,7 @@ def _with_settrace():
     finally:
         sys.settrace(prev_trace)
         threading.settrace(prev_thread_trace)  # type: ignore[arg-type]
-    return tracer.stats
+    return tracer
 
 
 def pytest_runtest_logreport(report):
@@ -109,7 +121,23 @@ def pytest_collectreport(report):
         _failed.add(report.nodeid)
 
 
+def _rel(config, nodeid_or_path) -> str:
+    """A node's file, or a path pytest reports, relative to the tree under test."""
+    path = Path(config.rootpath, str(nodeid_or_path).split("::")[0]).resolve()
+    return Path(os.path.relpath(path, _ROOT)).as_posix()
+
+
 def pytest_sessionfinish(session):
+    if _COLLECT:
+        # a module that failed to import is still a file to run: it fails there
+        files = [_rel(session.config, n) for n in
+                 [i.nodeid for i in session.items] + sorted(_failed)]
+        inifile = session.config.inipath
+        Path(_COLLECT).write_text(json.dumps({
+            "files": list(dict.fromkeys(files)),
+            "rootdir": _rel(session.config, session.config.rootpath),
+            "inifile": inifile and _rel(session.config, inifile),
+        }), encoding="utf-8")
     if not _OUT:
         return
     # a failed test's counts stop wherever it failed: not comparable. A test
@@ -117,5 +145,7 @@ def pytest_sessionfinish(session):
     data = {
         "passed": {n: fns for n, fns in _counts.items() if n in _passed and n not in _failed},
         "failed": sorted(_failed),
+        # too large to count: neither compared nor failed
+        "capped": sorted(_capped - _failed),
     }
     Path(_OUT).write_text(json.dumps(data, sort_keys=True), encoding="utf-8")

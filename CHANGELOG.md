@@ -38,6 +38,47 @@
   either tracer: their work follows the clock (timestamps in log lines) or a
   refresh timer. Collecting before every test as well was measured too, and
   dropped: it made jinja's traced suite 5x slower.
+- **Each test file runs in its own pytest process, several at once.** A test's
+  counts depended on which tests ran before it: caches they warmed, modules
+  they imported. On rich, 298 of 947 tests counted differently when their file
+  ran alone (one by 47x). A file's counts now depend only on that file, which
+  is what lets results be cached per file, and the files run in parallel:
+  each side of a diff took 6 s → 2.7 s on jinja and 6 s → 4.2 s on rich
+  (8 cores). `-j 1` runs one file at a time, for tests that cannot run side
+  by side.
+- **`--stability-runs N`** runs the head's test files N times and leaves out
+  any test whose counts differ between runs, naming it, so a test driven by
+  the clock or a timer thread cannot fail the gate. Three diffs of rich's
+  unchanged `main` against itself with `--stability-runs 2` all passed, each
+  leaving out 2 to 4 such tests (`test_live_empty` every time). The CI recipe
+  in the README now uses it.
+- **The base side is counted once per test file and kept.** Results go to
+  `.pyxtrace/tests/`, keyed by a hash of the base commit, the test file, every
+  conftest and test helper, the Python version, the tracer, the installed
+  packages and pyxTrace itself. A second diff against the same base runs only
+  the head (rich: 10.5 s → 6.0 s), and editing one test file counts only that
+  file again. A kept entry is byte-identical to a fresh count. The README's CI
+  recipe caches the directory.
+- **Only the test files a change can reach run on the head.** Each test's
+  base results already list the functions it ran, so a file runs on the head
+  only when one of its tests ran a changed function on the base, or failed
+  there. A change outside any function (an import, a module constant, a class
+  attribute), to a non-Python file, or a deleted module runs every file and
+  says why; prose, `.github/` and a version bump in `pyproject.toml` do not.
+  `--all-tests` runs every file. The report says how many ran. Files left out
+  count on the head what they counted on the base, so a function's growth is
+  judged against the whole suite either way.
+- **`--max-test-calls N`** (default 5,000,000): a test that makes more calls
+  stops being counted and runs on untraced, and is named in the report rather
+  than compared. On sqlglot one stress test makes 70M calls; with the limit,
+  its test file traces in 41 s instead of 227 s (17 s untraced). The
+  largest test on jinja makes 324,000 calls, on rich 55,000.
+- **`--file-timeout SECONDS`** (default 600): a test file still running after
+  that long is stopped and named, and its tests are not compared. A pull
+  request that fixes an infinite loop and adds a test for it used to hang
+  the diff for good, because the head's test runs on the base's unfixed code
+  (found on rich's `7338cb9`). A file that timed out is not kept in
+  `.pyxtrace/tests/`, since how long it takes depends on the machine.
 - **Nothing is left out silently.** Tests that fail on the head are named.
   Changed functions the gate could not compare are split into "no test runs
   it" (existing or new) and "run only by tests new in this change, so there is

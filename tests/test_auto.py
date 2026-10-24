@@ -11,7 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from pyxtrace.auto import changed_lines, functions_at, is_changed, is_test_path, related_changes
+from pyxtrace.auto import (
+    _outside_functions,
+    changed_lines,
+    functions_at,
+    is_changed,
+    is_test_path,
+    related_changes,
+)
 
 pytestmark = pytest.mark.skipif(
     subprocess.run(["git", "--version"], capture_output=True).returncode != 0,
@@ -85,6 +92,7 @@ def repo(tmp_path: Path) -> Path:
     _git(r, "config", "user.email", "t@example.com")
     _git(r, "config", "user.name", "t")
     _commit(r, "base", {
+        ".gitignore": ".pyxtrace/\n",
         "src/shop/__init__.py": "",
         "src/shop/orders.py": ORDERS,
         "tests/test_orders.py": TEST,
@@ -374,6 +382,201 @@ def test_the_test_only_flags_are_refused_for_recorded_runs(repo: Path, tmp_path:
     r = _diff(repo, str(run), str(run), "--require-covered")
     assert r.returncode == 2
     assert "apply when diff runs your tests" in r.stderr
+
+
+REFUND_TEST = '''\
+from shop.orders import refund
+
+
+def test_refund():
+    assert refund(2) == 3.0
+'''
+
+
+def test_the_base_is_counted_once_per_test_file(repo: Path) -> None:
+    _commit(repo, "regress", {"src/shop/orders.py": _regress(ORDERS),
+                              "tests/test_refund.py": REFUND_TEST})
+    first = _diff(repo, "main", "HEAD")
+    assert "running 2 test file(s) on main" in first.stderr
+    cache = repo / ".pyxtrace" / "tests"
+    entries = {p.name: p.read_bytes() for p in cache.glob("*.json")}
+    assert len(entries) == 2
+
+    again = _diff(repo, "main", "HEAD")
+    assert "2 of 2 test file(s) on main" in again.stderr
+    assert "test file(s) on main" not in again.stderr.replace("2 of 2 test file(s) on main", "")
+    assert again.returncode == first.returncode == 1
+    assert again.stdout == first.stdout
+
+    # what was kept is what a fresh count gives, byte for byte
+    for p in cache.glob("*.json"):
+        p.unlink()
+    _diff(repo, "main", "HEAD")
+    assert {p.name: p.read_bytes() for p in cache.glob("*.json")} == entries
+
+    # a changed test file is counted again on the base; the other one is not
+    _commit(repo, "more refunds", {"tests/test_refund.py": REFUND_TEST + (
+        "\n\ndef test_refund_zero():\n    assert refund(0) == 0\n")})
+    r = _diff(repo, "main", "HEAD")
+    assert "1 of 2 test file(s) on main" in r.stderr
+    assert "running 1 test file(s) on main" in r.stderr
+
+
+def test_only_test_files_that_run_the_changed_code_run_on_the_head(repo: Path) -> None:
+    _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "slower refund", {"src/shop/orders.py": ORDERS.replace(
+        "    return order_id * 1.5",
+        "    return sum(order_id * 3 for _ in range(10)) / 20")})  # exact on every Python
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "src/shop/orders.py::refund" in r.stdout
+    assert "Ran 1 of 2 test file(s) on HEAD" in r.stdout
+    assert "running 1 test file(s) on HEAD" in r.stderr
+    # every file, on request
+    r = _diff(repo, "main", "HEAD", "--all-tests")
+    assert "running 2 test file(s) on HEAD" in r.stderr
+    assert "Ran 1 of 2" not in r.stdout
+
+
+def test_running_fewer_files_does_not_change_the_verdict(repo: Path) -> None:
+    """Found on rich (ffe2edc): a helper every test uses grew 177% across the
+    selected files' tests, and under 10% across the whole suite's."""
+    _commit(repo, "formatting", {
+        "src/shop/fmt.py": "def pad(s):\n    return s + ' '\n\n\n"
+                           "def label(n):\n    return pad(str(n))\n",
+        "tests/test_label.py": "from shop.fmt import label\n\n\n"
+                               "def test_label():\n    assert [label(i) for i in range(10)]\n",
+        "tests/test_pad.py": "from shop.fmt import pad\n\n\n"
+                             "def test_pad():\n    assert [pad('x') for _ in range(1000)]\n",
+    })
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "more padding", {"src/shop/fmt.py": (
+        "def pad(s):\n    return s + ' '\n\n\n"
+        "def label(n):\n    s = str(n)\n    for _ in range(5):\n        s = pad(s)\n"
+        "    return s.rstrip() + ' '\n")})
+    r = _diff(repo, "main", "HEAD")
+    assert "Ran 1 of 3 test file(s)" in r.stdout, r.stdout + r.stderr
+    assert "src/shop/fmt.py::label" in r.stdout
+    assert "⚠  src/shop/fmt.py::pad" not in r.stdout, r.stdout  # +5% across the suite
+    full = _diff(repo, "main", "HEAD", "--all-tests")
+    assert full.returncode == r.returncode
+    assert full.stdout == r.stdout.replace(r.stdout.splitlines()[1] + "\n", "")
+
+
+def test_a_test_for_a_fixed_hang_is_stopped_on_the_base(repo: Path) -> None:
+    """Found on rich (7338cb9): a fix for an infinite loop came with a test,
+    and that test never ends on the code before the fix."""
+    _commit(repo, "halving", {"src/shop/halve.py": "def halve(n):\n    while n != 0:\n"
+                                                    "        n -= 2\n    return n\n"})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "fix odd numbers", {
+        "src/shop/halve.py": "def halve(n):\n    while n > 0:\n        n -= 2\n    return n\n",
+        "tests/test_halve.py": "from shop.halve import halve\n\n\n"
+                               "def test_odd():\n    assert halve(3) == -1\n",
+    })
+    r = _diff(repo, "main", "HEAD", "--file-timeout", "3")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test file(s) were still running after 3 s on one side" in r.stdout
+    assert "tests/test_halve.py" in r.stdout
+    assert "on 1 test(s)" in r.stdout  # test_handle_request is still compared
+    # a timeout depends on the machine, so only test_orders.py's base results are kept
+    assert len(list((repo / ".pyxtrace" / "tests").glob("*.json"))) == 1
+
+
+def test_a_change_outside_any_function_runs_every_test_file(repo: Path) -> None:
+    _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "a constant", {"src/shop/orders.py": "RATE = 1.5\n" + ORDERS})
+    r = _diff(repo, "main", "HEAD")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "src/shop/orders.py changed outside a function" in r.stderr
+    assert "running 2 test file(s) on HEAD" in r.stderr
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="reads pyproject.toml with tomllib")
+def test_prose_and_a_version_bump_do_not_run_every_test_file(repo: Path) -> None:
+    _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST,
+                                   "pyproject.toml": '[project]\nname = "shop"\nversion = "1.0"\n'})
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "release", {
+        "CHANGELOG.md": "# 1.1\n",
+        "pyproject.toml": '[project]\nname = "shop"\nversion = "1.1"\n',
+        "src/shop/orders.py": ORDERS.replace("return order_id * 1.5", "return order_id * 3 / 2"),
+    })
+    r = _diff(repo, "main", "HEAD")
+    assert "running 1 test file(s) on HEAD" in r.stderr, r.stderr
+    # pytest's own settings are not metadata
+    _commit(repo, "pytest config", {"pyproject.toml": '[project]\nname = "shop"\nversion = "1.1"\n'
+                                                      '[tool.pytest.ini_options]\naddopts = "-q"\n'})
+    r = _diff(repo, "main", "HEAD")
+    assert "pyproject.toml changed, which any test may depend on" in r.stderr
+
+
+def test_code_outside_functions_is_told_from_comments_and_docstrings() -> None:
+    src = textwrap.dedent('''\
+        """Module docstring."""
+        import os
+        RATE = 1.5
+
+        # a comment
+        @dataclass
+        class Shop:
+            """Class docstring."""
+            tax = 0.2
+
+            def total(self):
+                return 1
+        ''')
+    assert not _outside_functions(src, {1, 4, 5, 8, 11, 12})
+    for line in (2, 3, 6, 7, 9):  # import, constant, decorator, class line, class attribute
+        assert _outside_functions(src, {line}), line
+
+
+def test_a_test_past_the_call_limit_is_named_not_compared(repo: Path) -> None:
+    _commit(repo, "regress", {"src/shop/orders.py": _regress(ORDERS)})
+    r = _diff(repo, "main", "HEAD", "--max-test-calls", "50")
+    # the regression is only in a test too large to count: missed, but never silently
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test(s) made more than 50 calls and were not counted" in r.stdout
+    assert "tests/test_orders.py::test_handle_request" in r.stdout
+
+
+def test_a_test_whose_counts_move_between_runs_is_left_out(repo: Path, tmp_path: Path) -> None:
+    # does more work every time it runs, as a test driven by the clock can
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    _commit(repo, "unstable test", {"tests/test_unstable.py": f'''\
+        import os
+
+        def test_unstable():
+            n = 1
+            while True:  # claim the next number; the head's runs are parallel
+                try:
+                    os.close(os.open(os.path.join({str(runs)!r}, str(n)), os.O_CREAT | os.O_EXCL))
+                    break
+                except FileExistsError:
+                    n += 1
+            assert sum(1 for _ in range(n * 100)) > 0
+        '''})
+    # the test runs no changed code, so only --all-tests runs it on the head
+    r = _diff(repo, "main", "HEAD", "--all-tests")
+    assert r.returncode == 1, r.stdout + r.stderr  # the noise, read as a regression
+    r = _diff(repo, "main", "HEAD", "--all-tests", "--stability-runs", "2")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 test(s) counted differently from one run of HEAD" in r.stdout
+    assert "tests/test_unstable.py::test_unstable" in r.stdout
+    assert "on 1 test(s)" in r.stdout  # test_handle_request is still compared
 
 
 def test_unseeded_random_does_not_move_a_tests_counts(tmp_path: Path) -> None:

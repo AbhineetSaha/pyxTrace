@@ -69,8 +69,11 @@ class _Tool:
 class MonitorTracer:
     """Counts calls and lines of code under *root_path* between start() and stop()."""
 
-    def __init__(self, *, root_path: str | Path) -> None:
+    def __init__(self, *, root_path: str | Path, max_calls: int = 0) -> None:
         self._root = Path(root_path).resolve()
+        # past max_calls (0: never) counting stops and `capped` is set
+        self._max_calls = max_calls or sys.maxsize
+        self.capped = False
         self._codes: Dict[int, CodeType] = {}  # keeps every counted code object alive
         self._shards: List[Tuple[Counter, Counter, Counter]] = []
         self._local = threading.local()
@@ -103,7 +106,7 @@ class MonitorTracer:
         root, keep_cache, codes = self._root, _keep_cache(self._root), self._codes
         local, shards = self._local, self._shards
         getframe = sys._getframe
-        boundary = self._boundary
+        boundary, tool = self._boundary, self._tool
 
         def keep(filename: str) -> bool:
             k = keep_cache.get(filename)
@@ -124,9 +127,18 @@ class MonitorTracer:
                 shards.append(s)  # list.append is atomic
                 return s
 
+        calls_left = self._max_calls
+
         def on_start(code: CodeType, offset: int) -> Any:
+            nonlocal calls_left
             if not keep(code.co_filename):
                 return DISABLE  # for good: this code is never reported again
+            calls_left -= 1
+            if calls_left < 0:
+                # the rest runs at full speed; the counts are partial
+                self.capped = True
+                sys.monitoring.set_events(tool, 0)  # type: ignore[attr-defined]
+                return None
             i = id(code)
             if i not in codes:
                 codes[i] = code

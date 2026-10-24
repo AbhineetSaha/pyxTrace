@@ -92,6 +92,23 @@ def _parser() -> argparse.ArgumentParser:
     d.add_argument("--no-merge-base", dest="merge_base", action="store_false", default=None,
                    help="when running the tests, compare against the tip of BEFORE rather "
                         "than where AFTER diverged from it (same as BEFORE..AFTER)")
+    d.add_argument("-j", "--jobs", type=_non_negative(int), default=0,
+                   help="when running the tests, how many test files to run at once "
+                        "(default: one per CPU; 1 if your tests cannot run side by side)")
+    d.add_argument("--stability-runs", type=int, choices=range(1, 11), default=1, metavar="N",
+                   help="when running the tests, run AFTER's N times and leave out tests "
+                        "whose counts differ between runs (default 1; 2 for a CI gate)")
+    d.add_argument("--all-tests", action="store_true",
+                   help="when running the tests, run every test file on AFTER, not only those "
+                        "whose tests ran the changed code on BEFORE")
+    d.add_argument("--max-test-calls", type=_non_negative(int), default=5_000_000, metavar="N",
+                   help="when running the tests, stop counting a test after N function calls "
+                        "and leave it out, naming it; stress tests otherwise dominate the "
+                        "traced time (default 5,000,000; 0: no limit)")
+    d.add_argument("--file-timeout", type=_non_negative(float), default=600, metavar="SECONDS",
+                   help="when running the tests, stop a test file still running after this "
+                        "long and leave its tests out, naming it; a test for a fixed hang never "
+                        "ends on the code before the fix (default 600; 0: no limit)")
     return p
 
 
@@ -211,10 +228,14 @@ def _auto_diff(p: argparse.ArgumentParser, a: argparse.Namespace) -> NoReturn:
     """No runs recorded: run the test suite on both sides and compare that."""
     try:
         # a pull request is compared from where it branched off, by default
-        r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False)
+        r = auto_diff(a.before, a.after, use_merge_base=a.merge_base is not False, jobs=a.jobs,
+                      stability_runs=a.stability_runs, all_tests=a.all_tests,
+                      max_calls=a.max_test_calls, file_timeout=a.file_timeout)
     except AutoDiffError as e:
         p.exit(2, f"pyxtrace: error: {e}\n")
-    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed)
+    render_auto_header(r.before_label, r.after_label, r.tests_compared, r.head_only, r.failed,
+                       r.unstable, r.capped, a.max_test_calls, r.timed_out, a.file_timeout,
+                       r.files_run, r.files_total)
     findings = diff(r.before, r.after, threshold=a.threshold, min_ops=a.min_ops)
     notes = {}
     for f in findings:

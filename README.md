@@ -91,9 +91,22 @@ do, so there is no baseline yet:
 
 `--require-covered` turns that last warning into a failure.
 
-Only each test's own body is counted, not fixtures or imports. Both commits'
-suites run, each traced (see *Overhead*), and pytest-xdist is not supported, so
-on a large suite a workload script is the faster gate.
+Only each test's own body is counted, not fixtures or imports. Each test file
+runs in its own pytest process, several at once, so a test's counts never depend
+on which other files ran before it; pytest-xdist itself is not used.
+
+On the head, only the test files that can see the change are run: those whose
+tests ran a changed function on the base (or failed there). A change outside
+any function (an import, a constant, a class attribute) or to a non-Python
+file can reach any test, so it runs every file, and says why. `--all-tests`
+always runs every file.
+
+A stress test can cost more traced time than the rest of the suite together
+(on sqlglot, one test is 82% of all counted lines). A test that makes more than
+5,000,000 calls (`--max-test-calls`) stops being counted and runs on untraced;
+it is named in the report and not compared, so a regression that only it would
+show is missed, never silently. The largest test on jinja makes 324,000 calls,
+on rich 55,000.
 
 ### With a workload script
 
@@ -177,8 +190,25 @@ dependencies:
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }                  # the base commit has to be present
 - run: pip install pyxtrace pytest -e .
-- run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD
+- uses: actions/cache@v4                    # the base side, counted once per test file
+  with:
+    path: .pyxtrace/tests
+    key: pyxtrace-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+    restore-keys: pyxtrace-${{ runner.os }}-
+- run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD --stability-runs 2
 ```
+
+The base side's results are kept in `.pyxtrace/tests/`, one entry per test file,
+named by a hash of everything the counts depend on: the base commit, that test
+file, every conftest and test helper, the Python version, the installed
+packages and pyxTrace itself. A second diff against the same base runs only the
+head; a pull request that edits one test file counts only that file again on the
+base. An entry can never be reused for anything it does not match, so restoring
+an older cache is safe.
+
+`--stability-runs 2` runs the head's tests twice and leaves out any test whose
+counts differ between the two, so a test driven by the clock cannot fail the
+gate. It lists those tests, and costs one more run of the head.
 
 With a workload script, run files are keyed by commit sha, so a PR gate records
 the base commit and the head and diffs them by name:
@@ -209,6 +239,11 @@ in the cache key — see *Limits*.
 | `pyxtrace diff BASE...HEAD` / `BASE..HEAD` | As in git: from where the two diverged, or from `BASE` itself |
 | `--require-covered` | With the test suite: fail when a changed function is run by no test |
 | `--fail-on-test-failure` | With the test suite: fail when a test fails on the head |
+| `--stability-runs N` | With the test suite: run the head's tests N times and leave out, and name, tests whose counts differ (default 1) |
+| `--all-tests` | With the test suite: run every test file on the head, not only those that ran the changed code |
+| `--max-test-calls N` | With the test suite: stop counting a test after N calls and name it instead of comparing it (default 5,000,000; 0 for no limit) |
+| `--file-timeout SECONDS` | With the test suite: stop a test file still running after this long and name it instead of comparing its tests (default 600; 0 for no limit) |
+| `-j N`, `--jobs N` | With the test suite: test files run at once, each in its own process (default: one per CPU) |
 | `--no-merge-base` | Compare against the tip of `BASE` even when `HEAD` does not contain all of it |
 | `--threshold N` | Percent growth that fails the gate (default 10) |
 | `--min-ops N` | Ignore growth below N operations (default 10), so a 2→3 line change is not an alarm |
@@ -240,7 +275,7 @@ away:
   random generators (NumPy, Faker), and work driven by the clock or by timer
   threads. On rich, 1 to 3 of 948 tests still move between runs by under
   0.1%, because log lines carry the time and a live display refreshes on a
-  timer.
+  timer. `--stability-runs 2` finds such tests and leaves them out.
 - **Names.** Functions are keyed by qualified name (`Cursor.execute`), so two
   classes' `__init__` never merge into one entry. Python 3.10 has no qualified
   names on code objects, so pyxTrace reads them from the source instead.

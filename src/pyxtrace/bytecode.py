@@ -85,8 +85,11 @@ class ProfileTracer:
     counts nondeterministic, and nothing but the GIL would prevent one.
     """
 
-    def __init__(self, *, root_path: str | Path | None = None) -> None:
+    def __init__(self, *, root_path: str | Path | None = None, max_calls: int = 0) -> None:
         self._root = None if root_path is None else Path(root_path).resolve()
+        # past max_calls (0: never) counting stops and `capped` is set
+        self._calls_left = max_calls or sys.maxsize
+        self.capped = False
         self._keep: Dict[str, bool] = {}
         # one shard per thread that ever ran traced code; list.append is atomic
         self._shards: List[Dict[Key, Dict[str, Any]]] = []
@@ -143,6 +146,10 @@ class ProfileTracer:
                 code.co_filename, self._root, self._keep
             ):
                 return None
+            self._calls_left -= 1
+            if self._calls_left < 0:
+                self._give_up(frame)
+                return None
             # a flag test, not attrgetter: the plain attribute read is ~4% faster
             key = (code.co_filename, code.co_qualname if _QUALNAME  # type: ignore[attr-defined]
                    else f"{code.co_name}{SEP}{code.co_firstlineno}")
@@ -172,6 +179,15 @@ class ProfileTracer:
             return self
 
         return self
+
+    def _give_up(self, frame: FrameType) -> None:
+        """Stop tracing this thread, so the rest runs at full speed; the counts are partial."""
+        self.capped = True
+        sys.settrace(None)
+        f: FrameType | None = frame
+        while f is not None:  # frames already traced would go on reporting lines
+            f.f_trace = None
+            f = f.f_back
 
 
 def _new_rec() -> Dict[str, Any]:

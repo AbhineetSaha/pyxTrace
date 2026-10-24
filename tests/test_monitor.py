@@ -195,3 +195,17 @@ def test_a_one_line_loop_outside_the_root_is_not_counted(tmp_path: Path) -> None
     counted = _with_monitoring(mod.main, tmp_path / "app")
     assert set(counted) == {"main.py::main"}
     assert counted == _with_settrace(mod.main, tmp_path / "app")
+
+
+def test_counting_stops_past_max_calls_and_starts_again_for_the_next_test() -> None:
+    work = _orders(True)
+    t = monitor.MonitorTracer(root_path=ROOT, max_calls=10)
+    t.start()
+    try:
+        work()
+    finally:
+        t.stop()
+    assert t.capped
+    assert sum(fn["calls"] for fn in _counts(t.stats, ROOT).values()) == 10
+    # switching events off did not leave the next tracer blind
+    assert _with_monitoring(work) == _with_settrace(work)

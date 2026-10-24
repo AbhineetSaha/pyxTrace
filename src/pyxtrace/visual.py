@@ -130,11 +130,17 @@ def render_diff(findings: list, *, threshold: float, console: Console | None = N
 
 
 def render_auto_header(before: str, after: str, compared: int, head_only: int,
-                       failed: list[str], console: Console | None = None) -> None:
+                       failed: list[str], unstable: list[str], capped: list[str],
+                       max_calls: int, timed_out: list[str], timeout: float,
+                       files_run: int = 0, files_total: int = 0,
+                       console: Console | None = None) -> None:
     """Say what an automatic diff compared, and what it left out, before its findings."""
     c = console or Console()
     c.print(f"[dim]Compared {escape(before)} → {escape(after)} on {compared:,} test(s) "
             "that passed on both[/]")
+    if files_run < files_total:
+        c.print(f"[dim]Ran {files_run:,} of {files_total:,} test file(s) on {escape(after)}: "
+                "the others run none of the changed code (--all-tests runs them all)[/]")
     if head_only:
         c.print(f"[dim]{head_only:,} test(s) pass only on {escape(after)} (new, or fixed by "
                 "this change) and have no baseline to compare with[/]")
@@ -144,6 +150,20 @@ def render_auto_header(before: str, after: str, compared: int, head_only: int,
         c.print(f"[yellow]⚠  {len(failed):,} test(s) failed on {escape(after)} and were not "
                 "compared (--fail-on-test-failure makes this fail the gate):[/]")
         _names(c, failed)
+    if unstable:
+        c.print(f"[yellow]⚠  {len(unstable):,} test(s) counted differently from one run of "
+                f"{escape(after)} to the next and were not compared:[/]")
+        _names(c, unstable)
+    if capped:
+        c.print(f"[yellow]⚠  {len(capped):,} test(s) made more than {max_calls:,} calls and were "
+                "not counted, so a regression only they show is missed "
+                "(--max-test-calls):[/]")
+        _names(c, capped)
+    if timed_out:
+        c.print(f"[yellow]⚠  {len(timed_out):,} test file(s) were still running after "
+                f"{timeout:g} s on one side and were stopped; their tests were not compared "
+                "(--file-timeout):[/]")
+        _names(c, timed_out)
 
 
 def _names(c: Console, names: list[str], shown: int = 10) -> None:
