@@ -176,6 +176,11 @@ def _changed_functions(base: str, head: str, base_tree: Path, head_tree: Path,
         changed |= {f"{path}::{q}" for q in functions_at(source, lines)}
         if _outside_functions(source, lines):
             wide = wide or f"{path} changed outside a function"
+        # an added or removed override changes what an unchanged call runs, and
+        # no base test ran the new method, so none would be selected
+        gained_or_lost = _all_functions(base_tree / path) ^ _all_functions(head_tree / path)
+        if any("." in q and not q.rsplit(".", 1)[0].endswith("<locals>") for q in gained_or_lost):
+            wide = wide or f"{path} gained or lost a method"
     return changed, wide
 
 

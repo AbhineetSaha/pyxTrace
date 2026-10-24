@@ -502,6 +502,27 @@ def test_a_change_outside_any_function_runs_every_test_file(repo: Path) -> None:
     assert "running 2 test file(s) on HEAD" in r.stderr
 
 
+def test_an_added_override_runs_every_test_file(repo: Path) -> None:
+    """No base test ran Square.area, which did not exist; every Square().area() runs it now."""
+    shapes = "class Shape:\n    def area(self):\n        return 1\n\n\nclass Square(Shape):\n    pass\n"
+    _commit(repo, "shapes", {
+        "src/shop/shapes.py": shapes,
+        "tests/test_shapes.py": "from shop.shapes import Square\n\n\n"
+                                "def test_area():\n    assert [Square().area() for _ in range(20)]\n",
+    })
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "feature")
+    _git(repo, "checkout", "-q", "feature")
+    _commit(repo, "slower squares", {"src/shop/shapes.py": shapes.replace("    pass\n", (
+        "    def area(self):\n        n = 0\n        for _ in range(3):\n            n += 1\n"
+        "        return n\n"))})
+    r = _diff(repo, "main", "HEAD")
+    assert "src/shop/shapes.py gained or lost a method" in r.stderr, r.stderr
+    assert "running 2 test file(s) on HEAD" in r.stderr
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "src/shop/shapes.py::Square.area" in r.stdout
+
+
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="reads pyproject.toml with tomllib")
 def test_prose_and_a_version_bump_do_not_run_every_test_file(repo: Path) -> None:
     _commit(repo, "refund tests", {"tests/test_refund.py": REFUND_TEST,

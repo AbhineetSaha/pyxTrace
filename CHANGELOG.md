@@ -63,8 +63,8 @@
   base results already list the functions it ran, so a file runs on the head
   only when one of its tests ran a changed function on the base, or failed
   there. A change outside any function (an import, a module constant, a class
-  attribute), to a non-Python file, or a deleted module runs every file and
-  says why; prose, `.github/` and a version bump in `pyproject.toml` do not.
+  attribute), a method added to or removed from a class, a change to a
+  non-Python file, or a deleted module runs every file and says why; prose, `.github/` and a version bump in `pyproject.toml` do not.
   `--all-tests` runs every file. The report says how many ran. Files left out
   count on the head what they counted on the base, so a function's growth is
   judged against the whole suite either way.
