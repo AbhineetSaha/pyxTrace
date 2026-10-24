@@ -24,7 +24,6 @@ from pyxtrace.run import (
     to_dict,
     worktree_dirty,
 )
-from pyxtrace.visual import render_run
 
 
 def hash_seed_fixed() -> bool:
@@ -155,6 +154,10 @@ class TraceSession:
                            script=display_name(str(self.script_path), root), commit=sha)
             save(data, out)
             print("[pyxTrace] ✔ finished")
+            # imported here: rich takes ~80 ms to load, and every per-file pytest
+            # process of a diff imports this module through the package
+            from pyxtrace.visual import render_run
+
             render_run(data, out)
             return data
 

@@ -376,6 +376,14 @@ def test_version(capsys) -> None:
     assert capsys.readouterr().out.strip() == f"pyxtrace {pyxtrace.__version__}"
 
 
+def test_the_pytest_plugin_does_not_load_rich() -> None:
+    """A diff starts one pytest process per test file, and rich costs each ~80 ms."""
+    r = subprocess.run([sys.executable, "-c", "import sys, pyxtrace.pytest_plugin; "
+                        "assert 'rich' not in sys.modules, 'rich loaded'"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
 def test_options_may_come_before_the_script(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     cli.main(["-o", str(tmp_path / "a.pyxt"), str(tmp_path / "a.py")])
