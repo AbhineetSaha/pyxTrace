@@ -429,7 +429,7 @@ def test_only_test_files_that_run_the_changed_code_run_on_the_head(repo: Path) -
     _git(repo, "checkout", "-q", "feature")
     _commit(repo, "slower refund", {"src/shop/orders.py": ORDERS.replace(
         "    return order_id * 1.5",
-        "    return sum(order_id * 1.5 / 10 for _ in range(10))")})
+        "    return sum(order_id * 3 for _ in range(10)) / 20")})  # exact on every Python
     r = _diff(repo, "main", "HEAD")
     assert r.returncode == 1, r.stdout + r.stderr
     assert "src/shop/orders.py::refund" in r.stdout

@@ -71,8 +71,11 @@ def pytest_runtest_call(item):
     if tracer.capped:
         _capped.add(item.nodeid)
     else:
-        _counts[item.nodeid] = to_dict(tracer.stats, root=_ROOT, script="pytest",
-                                       tracer=_TRACER)["functions"]
+        fns = to_dict(tracer.stats, root=_ROOT, script="pytest", tracer=_TRACER)["functions"]
+        # settrace times each function; a timing differs every run, and counts are
+        # compared run against run and kept as cache entries
+        _counts[item.nodeid] = {n: {k: v for k, v in fn.items() if k != "own_time"}
+                                for n, fn in fns.items()}
 
 
 def _with_monitoring():
