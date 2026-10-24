@@ -43,4 +43,4 @@ body:
     id: env
     attributes:
       label: pyxtrace version, Python version, OS
-      placeholder: pyxtrace 3.0.0, Python 3.13, macOS 15
+      placeholder: pyxtrace 4.0.0, Python 3.13, macOS 15

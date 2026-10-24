@@ -24,7 +24,7 @@ body:
     attributes:
       label: pyxtrace version
       description: Output of `pyxtrace --version`
-      placeholder: pyxtrace 3.0.0
+      placeholder: pyxtrace 4.0.0
     validations:
       required: true
   - type: input
