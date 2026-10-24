@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pyxtrace: deterministic performance regression checks for Python</title>
+<meta name="description" content="Catch Python performance regressions in CI by counting operations instead of measuring time. Same code, same counts, every run.">
+<meta property="og:title" content="pyxtrace">
+<meta property="og:description" content="Catch Python performance regressions in CI by counting operations instead of measuring time.">
+<meta property="og:image" content="https://abhineetsaha.github.io/pyxTrace/logo/social-preview.png">
+<link rel="icon" href="logo/icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #111827; --muted: #4b5563; --line: #e5e7eb;
+    --code-bg: #f3f4f6; --term-bg: #0b1220; --term-fg: #e5e7eb;
+    --accent: #0d9488; --warn: #b45309;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220; --fg: #e5e7eb; --muted: #9ca3af; --line: #1f2937;
+      --code-bg: #111a2e; --term-bg: #111a2e; --accent: #2dd4bf; --warn: #fbbf24;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 17px/1.6 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 16px 96px; }
+  header { text-align: center; margin-bottom: 48px; }
+  header img.logo { width: 320px; max-width: 80%; height: auto; }
+  .tagline { font-size: 20px; color: var(--muted); margin: 12px 0 24px; }
+  .links a { margin: 0 10px; }
+  a { color: var(--accent); }
+  h2 { font-size: 24px; margin: 56px 0 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+  h3 { font-size: 18px; margin: 32px 0 8px; }
+  code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace;
+         background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--term-bg); color: var(--term-fg); padding: 14px 18px;
+        border-radius: 8px; overflow-x: auto; font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre code { background: none; padding: 0; font: inherit; }
+  .demo { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+  .caption { text-align: center; color: var(--muted); font-size: 15px; }
+  table { border-collapse: collapse; width: 100%; font-size: 16px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  tr.us td { font-weight: 600; }
+  footer { margin-top: 64px; color: var(--muted); font-size: 15px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="logo/logo-dark.svg">
+    <img class="logo" alt="pyxtrace" src="logo/logo-light.svg">
+  </picture>
+  <p class="tagline">Catch Python performance regressions in CI deterministically,
+    so your benchmark gate stops crying wolf.</p>
+  <p class="links">
+    <a href="https://github.com/AbhineetSaha/pyxTrace">GitHub</a>
+    <a href="https://pypi.org/project/pyxtrace/">PyPI</a>
+    <a href="https://github.com/AbhineetSaha/pyxTrace#readme">Full docs</a>
+  </p>
+</header>
+
+<img class="demo" src="demo.gif" alt="Recording a run, committing a change, and pyxtrace diff attributing the regression to the call that caused it" width="820" height="513">
+<p class="caption"><a href="demo.mp4">Narrated version (MP4, 1 min)</a></p>
+
+<h2>Why</h2>
+<p>Wall-clock benchmarks are noisy enough to make a pull-request gate unreliable.
+Run the same unchanged code seven times and time it, then count the operations it
+performed on those same runs:</p>
+<pre><code>wall-clock       : 2.06ms  2.06ms  2.20ms  2.04ms  2.06ms  2.05ms  2.17ms   → 3.1% spread
+operation counts : 3196    3196    3196    3196    3196    3196    3196     → 0.0% spread</code></pre>
+<p>That 3.1% is on an idle machine, the <em>best</em> case. On wall-clock you either set
+the threshold tight and get flaky failures, or set it wide and miss real regressions.</p>
+<p>pyxtrace counts <strong>operations</strong> (function calls and lines executed) instead
+of measuring time. Those counts are byte-for-byte reproducible, so a 10% threshold
+actually means something.</p>
+
+<h2>Install</h2>
+<pre><code>pip install pyxtrace</code></pre>
+<p>One dependency (<code>rich</code>). Python 3.10+.</p>
+
+<h2>Use</h2>
+<h3>With your test suite: nothing to set up</h3>
+<pre><code>pyxtrace diff main HEAD      # or `pyxtrace diff main` for uncommitted work</code></pre>
+<p>With no runs recorded, <code>diff</code> uses your pytest suite as the workload. It
+checks out both commits into temporary git worktrees (your checkout is never touched),
+runs the head's tests against both versions of the code, and counts each test on its own.
+Each regression is tied to the diff: a function the change edited is marked
+<code>← changed in this diff</code>, and one that only got busier names the changed
+functions on its call path.</p>
+
+<h3>With a workload script</h3>
+<pre><code>pyxtrace examples/orders.py      # → .pyxtrace/&lt;commit sha&gt;.pyxt
+# ... commit your change ...
+pyxtrace examples/orders.py
+pyxtrace diff HEAD~1 HEAD        # any git ref, or a .pyxt path</code></pre>
+<p><code>diff</code> exits <strong>1</strong> when something regressed, so it drops straight into CI.</p>
+
+<h3>What a caught regression looks like</h3>
+<pre><code>⚠  examples/orders.py::process_order  +120 calls to other functions  (same code, more work)
+   process_order() runs 120x and makes 1 more call(s) to fetch_customer() each time
+   Attributed to:
+     examples/orders.py::fetch_customer   0 → 120 calls   new
+
+⚠  examples/orders.py::Cursor.execute  +5,950% operations  (6 → 363)
+
+⚠  examples/orders.py::fetch_customer  new operations  (0 → 240)
+   Attributed to:
+     examples/orders.py::Cursor.execute   0 → 120 calls   new
+
+✗ FAIL — 3 function(s) regressed</code></pre>
+<p>Every line is arithmetic over exact counts. There is no confidence score because
+there is nothing to be uncertain about.</p>
+
+<h2>In CI</h2>
+<p>With a test suite, the gate is one step after installing your project's test dependencies:</p>
+<pre><code>- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }                  # the base commit has to be present
+- run: pip install pyxtrace pytest -e .
+- uses: actions/cache@v4                    # the base side, counted once per test file
+  with:
+    path: .pyxtrace/tests
+    key: pyxtrace-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+    restore-keys: pyxtrace-${{ runner.os }}-
+- run: pyxtrace diff ${{ github.event.pull_request.base.sha }} HEAD --stability-runs 2</code></pre>
+<p>The base side's results are cached per test file, keyed by everything the counts
+depend on, so a second diff against the same base runs only the head.
+<code>--stability-runs 2</code> leaves out any test whose counts differ between two runs,
+so a test driven by the clock cannot fail the gate.
+<a href="https://github.com/AbhineetSaha/pyxTrace#in-ci">The workload-script recipe is in the README.</a></p>
+
+<h2>Limits</h2>
+<p>pyxtrace counts Python operations. Work inside C (regexes, NumPy, database drivers, I/O
+waits) is invisible to it, so it is strongest on pure-Python CPU-bound code: parsers,
+template engines, serializers, business logic. Counts are exact per Python minor version,
+and they are a proxy for cost, not a measure of it.
+<a href="https://github.com/AbhineetSaha/pyxTrace#limits">All the limits, stated plainly.</a></p>
+
+<h2>When to use something else</h2>
+<table>
+  <tr><th>You want</th><th>Use</th></tr>
+  <tr><td>Profile a running production process</td><td><a href="https://github.com/benfred/py-spy">py-spy</a></td></tr>
+  <tr><td>Find where memory is allocated</td><td><a href="https://github.com/bloomberg/memray">memray</a></td></tr>
+  <tr><td>A readable one-off wall-clock profile</td><td><a href="https://github.com/joerick/pyinstrument">pyinstrument</a></td></tr>
+  <tr><td>A timeline / flame-graph UI</td><td><a href="https://github.com/gaogaotiantian/viztracer">VizTracer</a></td></tr>
+  <tr class="us"><td>Know whether this PR made things slower</td><td>pyxtrace</td></tr>
+</table>
+
+<footer>
+  MIT licensed ·
+  <a href="https://github.com/AbhineetSaha/pyxTrace">github.com/AbhineetSaha/pyxTrace</a> ·
+  <a href="https://github.com/AbhineetSaha/pyxTrace/issues/new?template=field_report.yml">Tried it? Tell us what happened</a>
+</footer>
+
+</main>
+</body>
+</html>

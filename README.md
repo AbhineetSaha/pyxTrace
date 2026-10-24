@@ -15,7 +15,7 @@
 
 <img src="https://raw.githubusercontent.com/AbhineetSaha/pyxTrace/main/docs/demo.gif" alt="Recording a run, committing a change, and pyxtrace diff attributing the regression to the call that caused it" width="820">
 
-<p><a href="https://github.com/AbhineetSaha/pyxTrace/blob/main/docs/demo.mp4">Narrated version (MP4, 1 min)</a></p>
+<p><a href="https://github.com/AbhineetSaha/pyxTrace/blob/main/docs/demo.mp4">Narrated version (MP4, 1 min)</a> · <a href="https://abhineetsaha.github.io/pyxTrace/">Website</a></p>
 
 </div>
 

@@ -65,7 +65,7 @@ def _record(tmp: Path, name: str, n_plus_one: bool) -> dict:
 
 def _term() -> Console:
     """A console that records for HTML export and prints nothing to the terminal."""
-    return Console(record=True, width=90, file=io.StringIO(), force_terminal=True)
+    return Console(record=True, width=100, file=io.StringIO(), force_terminal=True)
 
 
 def _html(c: Console) -> str:
