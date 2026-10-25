@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.0.0
 
 - **A branch is compared from where it diverged.** With no recorded runs,
   `pyxtrace diff main HEAD` now starts from the merge-base, as a pull request
